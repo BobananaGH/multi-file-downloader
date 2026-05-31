@@ -2,6 +2,8 @@ import os
 import socket
 from shared import protocol as p
 
+DOWNLOAD_DIR = os.path.join(os.path.dirname(__file__), "downloads")
+os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 class Client:
     def __init__(self, host="127.0.0.1", port=5000):
@@ -67,7 +69,9 @@ class Client:
         
         print(f"Starting download: {safe_name} ({size} bytes)...")
         
-        with open(safe_name, "wb") as f:
+        save_path = os.path.join(DOWNLOAD_DIR, safe_name)
+        
+        with open(save_path, "wb") as f:
             received = 0
             
             while received < size:

@@ -62,11 +62,15 @@ class Connection:
         self.conn = conn
         self.buffer = b""
 
+    def send_line(self, message: str):
+        self.conn.sendall((message + DELIM).encode())
+
     def recv_line(self):
         while DELIM_BYTES not in self.buffer:
             chunk = self.conn.recv(BUFFER_SIZE)
             if not chunk:
                 return None
+
             self.buffer += chunk
 
             if len(self.buffer) > MAX_BUFFER_SIZE:
@@ -74,3 +78,25 @@ class Connection:
 
         line, self.buffer = self.buffer.split(DELIM_BYTES, 1)
         return line.decode("utf-8", errors="replace")
+
+    def recv_bytes(self, size: int):
+        data = bytearray()
+
+        # consume leftover buffered bytes first
+        if self.buffer:
+            take = min(len(self.buffer), size)
+            data += self.buffer[:take]
+            self.buffer = self.buffer[take:]
+
+        while len(data) < size:
+            chunk = self.conn.recv(min(CHUNK_SIZE, size - len(data)))
+
+            if not chunk:
+                break
+
+            data += chunk
+
+        return bytes(data)
+
+    def close(self):
+        self.conn.close()
