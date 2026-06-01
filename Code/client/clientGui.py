@@ -301,6 +301,14 @@ class FileClientGUI(QMainWindow):
         filtered = [f for f in self._all_files if q in f.lower()] if q else self._all_files
         self._render_file_list(filtered)
 
+    def _sort_files(self, mode: str = "name"):
+        files = self._all_files.copy()
+        if mode == "name":
+            files.sort(key=lambda x: x.lower())
+        elif mode == "name_desc":
+            files.sort(key=lambda x: x.lower(), reverse=True)
+        self._render_file_list(files)
+
     # ------------------------------------------------------------------ #
     #  Download Logic                                                      #
     # ------------------------------------------------------------------ #
