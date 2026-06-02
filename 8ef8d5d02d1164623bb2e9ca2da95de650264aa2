@@ -1,7 +1,0 @@
-Hey team, I finished refactoring the server backend so it's ready to plug into the Server GUI:
-- Changed server.py to use a ServerEngine class. It runs on background threads (using threading) so it won't freeze the GUI and handles multiple client downloads at the same time.
-- Updated utils.py so we can capture live logs and print them in a text box on the server GUI. Used a thread-safe callback list.
-- Added live stats tracking! It now records active connections, uptime, client IP/port, what files they are downloading, and calculates upload speed (updated every 1s).
-- Wrote INTEGRATION.md with clean code examples (especially using PySide6 signals) so the GUI dev can easily connect my backend to their UI buttons.
-
-Let me know if you guys find any issues!
