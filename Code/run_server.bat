@@ -1,3 +1,3 @@
-cd /d "%~dp0Code"
+@echo off
 python -m server
 pause
