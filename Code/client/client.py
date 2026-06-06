@@ -1,6 +1,6 @@
 import os
 import socket
-# import ssl
+import ssl
 from shared import protocol as p
 
 DOWNLOAD_DIR = os.path.join(os.path.dirname(__file__), "downloads")
