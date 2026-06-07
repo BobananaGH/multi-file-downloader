@@ -280,6 +280,12 @@ class ServerEngine:
                         continue
 
                     filename = os.path.basename(parts[1])
+                    
+                    if not filename:
+                        p.send_line(conn, p.encode_error("Invalid filename"))
+                        log("ERROR", f"Empty filename from {addr}")
+                        continue
+                    
                     filepath = os.path.join(self.storage_dir, filename)
 
                     if not os.path.exists(filepath):
