@@ -332,3 +332,49 @@ QScrollArea#downloadScroll QScrollBar::handle:vertical {
 QScrollArea#downloadScroll QScrollBar::handle:vertical:hover {
     background: #4a90e2;
 }
+
+QPushButton#cancelBtn {
+    background-color: transparent;
+    border: 1px solid #555555;
+    border-radius: 4px;
+    color: #888888;
+    font-size: 10px;
+    padding: 0px;
+    font-weight: normal;
+}
+
+QPushButton#cancelBtn:hover {
+    border-color: #e25555;
+    color: #e25555;
+    background-color: #3a2020;
+}
+/* ── Context Menu ─────────────────────────────────────────────────────── */
+QMenu {
+    background-color: #2f2f2f;
+    border: 1px solid #555555;
+    border-radius: 8px;
+    padding: 6px;
+    color: #ffffff;
+}
+
+QMenu::item {
+    padding: 8px 18px;
+    border-radius: 6px;
+    background-color: transparent;
+    margin: 2px 0px;
+}
+
+QMenu::item:selected {
+    background-color: #4a90e2;
+    color: #ffffff;
+}
+
+QMenu::item:disabled {
+    color: #777777;
+}
+
+QMenu::separator {
+    height: 1px;
+    background: #444444;
+    margin: 6px 4px;
+}
