@@ -1,21 +1,72 @@
 import sys
-import socket
+import os
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
+
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QListWidget, QLabel, QLineEdit,
-    QProgressBar, QScrollArea, QFrame, QStatusBar,
-    QMainWindow, QListWidgetItem, QMessageBox
+    QPushButton, QLabel, QLineEdit,
+    QProgressBar, QScrollArea, QFrame,
+    QMainWindow, QListWidgetItem, QMessageBox, QTreeWidget, QTreeWidgetItem, QHeaderView
 )
-from PySide6.QtCore import Qt, QThread, Signal, QSize
-from PySide6.QtGui import QIcon, QFont
+from PySide6.QtCore import Qt, QThread, Signal
+from client.client import Client
 
-HOST = "127.0.0.1"
-PORT = 5000
 
+class FetchFilesThread(QThread):
+    files_received = Signal(list)
+    error_occurred = Signal(str)
+
+    def run(self):
+        try:
+            c = Client()
+            files = c.list_files()
+            c.close()
+            self.files_received.emit(files)
+        except Exception as e:
+            self.error_occurred.emit(str(e))
+
+
+class DownloadThread(QThread):
+    progress = Signal(str, int)
+    finished_file = Signal(str, bool, str)
+
+    def __init__(self, filenames: list[str]):
+        super().__init__()
+        self.filenames = filenames
+
+    def run(self):
+        c = None
+        try:
+            c = Client()
+
+            for filename in self.filenames:
+                try:
+                    def on_progress(received, total, fn=filename):
+                        percent = 0 if total == 0 else int((received / total) * 100)
+                        self.progress.emit(fn, percent)
+
+                    success, save_path = c.download_file(
+                        filename,
+                        on_progress=on_progress
+                    )
+
+                    self.finished_file.emit(filename, success, save_path or "")
+
+                except Exception as file_err:
+                    self.finished_file.emit(filename, False, str(file_err))
+
+        except Exception as e:
+            # global failure (connection broke etc.)
+            error_msg = str(e)
+            for filename in self.filenames:
+                self.finished_file.emit(filename, False, error_msg)
+
+        finally:
+            if c:
+                c.close()
 
 class DownloadItemWidget(QFrame):
-    """Widget representing a single file download progress row."""
-
     def __init__(self, filename: str, parent=None):
         super().__init__(parent)
         self.setObjectName("downloadItem")
@@ -25,7 +76,6 @@ class DownloadItemWidget(QFrame):
         layout.setContentsMargins(12, 10, 12, 10)
         layout.setSpacing(6)
 
-        # Top row: filename + status
         top_row = QHBoxLayout()
         self.name_label = QLabel(filename)
         self.name_label.setObjectName("downloadFilename")
@@ -38,14 +88,12 @@ class DownloadItemWidget(QFrame):
         top_row.addStretch()
         top_row.addWidget(self.status_label)
 
-        # Progress bar
         self.progress_bar = QProgressBar()
         self.progress_bar.setObjectName("downloadProgress")
         self.progress_bar.setValue(0)
         self.progress_bar.setTextVisible(False)
         self.progress_bar.setFixedHeight(6)
 
-        # Bottom row: size info
         self.info_label = QLabel("Waiting to start...")
         self.info_label.setObjectName("downloadInfo")
 
@@ -66,25 +114,12 @@ class DownloadItemWidget(QFrame):
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
 
-
-class FetchFilesThread(QThread):
-    """Worker thread to fetch file list from server without blocking UI."""
-    files_received = Signal(list)
-    error_occurred = Signal(str)
-
-    def run(self):
-        try:
-            client = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            client.settimeout(5)
-            client.connect((HOST, PORT))
-            data = client.recv(4096).decode()
-            client.close()
-            if data == "NO_FILES":
-                self.files_received.emit([])
-            else:
-                self.files_received.emit(data.split("|"))
-        except Exception as e:
-            self.error_occurred.emit(str(e))
+    def set_error(self):
+        self.status_label.setText("✗ Failed")
+        self.status_label.setProperty("state", "error")
+        self.info_label.setText("Download failed")
+        self.status_label.style().unpolish(self.status_label)
+        self.status_label.style().polish(self.status_label)
 
 
 class FileClientGUI(QMainWindow):
@@ -96,15 +131,12 @@ class FileClientGUI(QMainWindow):
 
         self._all_files: list[str] = []
         self._download_widgets: dict[str, DownloadItemWidget] = {}
+        self._download_threads: list[DownloadThread] = []
 
         self._build_ui()
         self._load_styles()
         self.load_files()
-
-    # ------------------------------------------------------------------ #
-    #  UI Construction                                                     #
-    # ------------------------------------------------------------------ #
-
+        
     def _build_ui(self):
         central = QWidget()
         self.setCentralWidget(central)
@@ -112,7 +144,7 @@ class FileClientGUI(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
 
-        # ── Header ──────────────────────────────────────────────────────
+        # Header
         header = QWidget()
         header.setObjectName("header")
         header_layout = QHBoxLayout(header)
@@ -120,7 +152,6 @@ class FileClientGUI(QMainWindow):
 
         title = QLabel("FLUX")
         title.setObjectName("appTitle")
-
         subtitle = QLabel("Multi File Downloader")
         subtitle.setObjectName("appSubtitle")
         subtitle.setAlignment(Qt.AlignVCenter)
@@ -134,20 +165,16 @@ class FileClientGUI(QMainWindow):
         self.refresh_btn.setCursor(Qt.PointingHandCursor)
         self.refresh_btn.clicked.connect(self.load_files)
         header_layout.addWidget(self.refresh_btn)
-
         root.addWidget(header)
-
-        # ── Divider ─────────────────────────────────────────────────────
         root.addWidget(self._make_divider())
 
-        # ── Body ────────────────────────────────────────────────────────
+        # Body
         body = QWidget()
         body.setObjectName("body")
         body_layout = QVBoxLayout(body)
         body_layout.setContentsMargins(24, 20, 24, 0)
         body_layout.setSpacing(14)
 
-        # Search bar
         search_row = QHBoxLayout()
         search_icon = QLabel("🔍")
         search_icon.setObjectName("searchIcon")
@@ -159,7 +186,6 @@ class FileClientGUI(QMainWindow):
         search_row.addWidget(self.search_bar)
         body_layout.addLayout(search_row)
 
-        # File list section label
         list_header = QHBoxLayout()
         files_label = QLabel("SERVER FILES")
         files_label.setObjectName("sectionLabel")
@@ -170,27 +196,34 @@ class FileClientGUI(QMainWindow):
         list_header.addWidget(self.count_label)
         body_layout.addLayout(list_header)
 
-        # File list
-        self.list_widget = QListWidget()
+        self.list_widget = QTreeWidget()
         self.list_widget.setObjectName("fileList")
-        self.list_widget.setSelectionMode(QListWidget.ExtendedSelection)
+        self.list_widget.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.list_widget.setFixedHeight(220)
+        self.list_widget.setHeaderLabels(["Filename", "Size"])
+
+        header = self.list_widget.header()
+
+        header.setStretchLastSection(False)
+        header.setSectionResizeMode(0, QHeaderView.Stretch)
+        header.setSectionResizeMode(1, QHeaderView.Fixed)
+
+        header.resizeSection(1, 75)
+        
+        self.list_widget.setRootIsDecorated(False)
         body_layout.addWidget(self.list_widget)
 
-        # Download button
         self.download_btn = QPushButton("⬇  Download Selected")
         self.download_btn.setObjectName("downloadBtn")
         self.download_btn.setCursor(Qt.PointingHandCursor)
         self.download_btn.clicked.connect(self._on_download_selected)
         body_layout.addWidget(self.download_btn)
-
         root.addWidget(body)
 
-        # ── Divider ─────────────────────────────────────────────────────
         root.addSpacing(10)
         root.addWidget(self._make_divider())
 
-        # ── Downloads Panel ─────────────────────────────────────────────
+        # Downloads panel
         downloads_panel = QWidget()
         downloads_panel.setObjectName("downloadsPanel")
         panel_layout = QVBoxLayout(downloads_panel)
@@ -209,7 +242,6 @@ class FileClientGUI(QMainWindow):
         dl_header.addWidget(self.clear_btn)
         panel_layout.addLayout(dl_header)
 
-        # Scrollable download list
         scroll = QScrollArea()
         scroll.setObjectName("downloadScroll")
         scroll.setWidgetResizable(True)
@@ -225,11 +257,9 @@ class FileClientGUI(QMainWindow):
 
         scroll.setWidget(self.downloads_container)
         panel_layout.addWidget(scroll)
-
         root.addWidget(downloads_panel)
         root.addStretch()
 
-        # ── Status Bar ──────────────────────────────────────────────────
         self.status_bar = self.statusBar()
         self.status_bar.setObjectName("mainStatusBar")
         self.status_bar.showMessage("Ready")
@@ -240,34 +270,28 @@ class FileClientGUI(QMainWindow):
         line.setObjectName("divider")
         return line
 
-    # ------------------------------------------------------------------ #
-    #  Styles                                                              #
-    # ------------------------------------------------------------------ #
-
     def _load_styles(self):
         try:
-            with open("clientGui.qss", "r") as f:
+            qss_path = os.path.join(os.path.dirname(__file__), "clientGui.qss")
+            with open(qss_path, "r") as f:
                 self.setStyleSheet(f.read())
         except FileNotFoundError:
-            pass  # Graceful fallback if .qss missing
-
-    # ------------------------------------------------------------------ #
-    #  File List Logic                                                     #
-    # ------------------------------------------------------------------ #
+            pass
 
     def load_files(self):
         self.refresh_btn.setEnabled(False)
         self.refresh_btn.setText("↻  Loading...")
         self.status_bar.showMessage("Connecting to server...")
 
-        self._thread = FetchFilesThread()
-        self._thread.files_received.connect(self._on_files_received)
-        self._thread.error_occurred.connect(self._on_fetch_error)
-        self._thread.finished.connect(lambda: self.refresh_btn.setEnabled(True))
-        self._thread.finished.connect(lambda: self.refresh_btn.setText("↻  Refresh"))
-        self._thread.start()
+        self._fetch_thread = FetchFilesThread()
+        self._fetch_thread.files_received.connect(self._on_files_received)
+        self._fetch_thread.error_occurred.connect(self._on_fetch_error)
+        self._fetch_thread.finished.connect(lambda: self._cleanup_thread(self._fetch_thread))
+        self._fetch_thread.finished.connect(lambda: self.refresh_btn.setEnabled(True))
+        self._fetch_thread.finished.connect(lambda: self.refresh_btn.setText("↻  Refresh"))
+        self._fetch_thread.start()
 
-    def _on_files_received(self, files: list[str]):
+    def _on_files_received(self, files: list[tuple[str, int]]):
         self._all_files = files
         self._render_file_list(files)
         count = len(files)
@@ -278,61 +302,84 @@ class FileClientGUI(QMainWindow):
     def _on_fetch_error(self, error: str):
         self._all_files = []
         self.list_widget.clear()
-        err_item = QListWidgetItem(f"⚠  Connection error: {error}")
-        err_item.setFlags(err_item.flags() & ~Qt.ItemIsSelectable)
-        self.list_widget.addItem(err_item)
+        item = QTreeWidgetItem([f"⚠  Connection error: {error}", ""])
+        item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+        self.list_widget.addTopLevelItem(item)
         self.count_label.setText("—")
         self.status_bar.showMessage(f"Error: {error}")
 
-    def _render_file_list(self, files: list[str]):
+    def _render_file_list(self, files: list[tuple[str, int]]):
         self.list_widget.clear()
         if not files:
-            empty = QListWidgetItem("No files available on server")
-            empty.setFlags(empty.flags() & ~Qt.ItemIsSelectable)
-            self.list_widget.addItem(empty)
+            item = QTreeWidgetItem(["No files available on server", ""])
+            item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
+            self.list_widget.addTopLevelItem(item)
             self.count_label.setText("0 files")
         else:
-            for f in files:
-                self.list_widget.addItem(f)
+            for name, size in files:
+                item = QTreeWidgetItem([name, self._format_size(size)])
+                item.setData(0, Qt.UserRole, name)
+                self.list_widget.addTopLevelItem(item)
             self.count_label.setText(f"{len(files)} file{'s' if len(files) != 1 else ''}")
-
+                
+    def _format_size(self, size: int) -> str:
+        if size < 1024:
+            return f"{size} B"
+        elif size < 1024 * 1024:
+            return f"{size/1024:.1f} KB"
+        else:
+            return f"{size/1024/1024:.1f} MB" 
+        
     def _filter_files(self, query: str):
         q = query.strip().lower()
-        filtered = [f for f in self._all_files if q in f.lower()] if q else self._all_files
+        filtered = [(n, s) for n, s in self._all_files if q in n.lower()] if q else self._all_files
         self._render_file_list(filtered)
 
-    def _sort_files(self, mode: str = "name"):
-        files = self._all_files.copy()
-        if mode == "name":
-            files.sort(key=lambda x: x.lower())
-        elif mode == "name_desc":
-            files.sort(key=lambda x: x.lower(), reverse=True)
-        self._render_file_list(files)
-
-    # ------------------------------------------------------------------ #
-    #  Download Logic                                                      #
-    # ------------------------------------------------------------------ #
-
     def _on_download_selected(self):
-        selected = [item.text() for item in self.list_widget.selectedItems()]
+        selected = [item.data(0, Qt.UserRole) for item in self.list_widget.selectedItems()]
         if not selected:
             QMessageBox.information(self, "No Selection", "Please select at least one file to download.")
             return
 
-        added = 0
+        to_download = []
         for filename in selected:
             if filename not in self._download_widgets:
                 widget = DownloadItemWidget(filename)
-                # Insert before the stretch at the end
                 idx = self.downloads_layout.count() - 1
                 self.downloads_layout.insertWidget(idx, widget)
                 self._download_widgets[filename] = widget
-                added += 1
+                to_download.append(filename)
 
-        if added:
-            self.status_bar.showMessage(f"Queued {added} file{'s' if added != 1 else ''} for download")
-        else:
+        if not to_download:
             self.status_bar.showMessage("Selected files are already in the download queue")
+            return
+
+        self.status_bar.showMessage(f"Downloading {len(to_download)} file{'s' if len(to_download) != 1 else ''}...")
+
+        thread = DownloadThread(to_download)
+        thread.progress.connect(self._on_download_progress)
+        thread.finished_file.connect(self._on_file_finished)
+        thread.finished.connect(lambda t=thread: self._cleanup_thread(t))
+        thread.start()
+        self._download_threads.append(thread)
+
+    def _on_download_progress(self, filename: str, percent: int):
+        if filename in self._download_widgets:
+            self._download_widgets[filename].set_progress(percent)
+
+    def _on_file_finished(self, filename: str, success: bool, save_path: str):
+        if filename in self._download_widgets:
+            if success:
+                self._download_widgets[filename].set_progress(100)
+            else:
+                self._download_widgets[filename].set_error()
+
+        self._download_threads = [t for t in self._download_threads if t.isRunning()]
+
+        self.status_bar.showMessage(
+            f"{'✓' if success else '✗'} {filename} — {'saved to ' + save_path if success else 'failed'}"
+        )
+        
 
     def _clear_downloads(self):
         for widget in self._download_widgets.values():
@@ -340,9 +387,11 @@ class FileClientGUI(QMainWindow):
             widget.deleteLater()
         self._download_widgets.clear()
         self.status_bar.showMessage("Download queue cleared")
-
-
-# ─────────────────────────────────────────────────────────────────────── #
+        
+    def _cleanup_thread(self, thread):
+        if thread in self._download_threads:
+            self._download_threads.remove(thread)
+        thread.deleteLater()
 
 if __name__ == "__main__":
     app = QApplication(sys.argv)

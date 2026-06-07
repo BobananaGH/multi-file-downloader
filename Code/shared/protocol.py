@@ -30,13 +30,15 @@ FILE = "FILE"
 # =========================
 
 
-def encode_list(files):
+def encode_list(files_with_sizes):
     """
-    Server sends file list to client
+    files_with_sizes: list of (filename, size) tuples
+    Format: LIST|filename1:size1|filename2:size2
     """
-    if not files:
+    if not files_with_sizes:
         return EMPTY
-    return f"LIST|{'|'.join(files)}"
+    entries = [f"{name}:{size}" for name, size in files_with_sizes]
+    return f"LIST|{'|'.join(entries)}"
 
 
 def encode_error(message):

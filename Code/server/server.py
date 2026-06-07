@@ -100,9 +100,14 @@ class ServerEngine:
             }
 
     def get_file_list(self):
-        """Retrieve the list of files stored in server file storage."""
         try:
-            return os.listdir(self.storage_dir)
+            files = os.listdir(self.storage_dir)
+            result = []
+            for f in files:
+                path = os.path.join(self.storage_dir, f)
+                size = os.path.getsize(path)
+                result.append((f, size))
+            return result
         except Exception as e:
             log("ERROR", f"Failed to list directory {self.storage_dir}: {e}")
             return []

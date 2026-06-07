@@ -15,84 +15,61 @@ class Client:
         self.socket = context.wrap_socket(self.socket, server_hostname="127.0.0.1")
         self.socket.connect((host, port))
         self.conn = p.Connection(self.socket)
-        
-    def list_files(self):
-        self.conn.send_line(p.LIST)
 
+    def list_files(self) -> list[tuple[str, int]]:
+        self.conn.send_line(p.LIST)
         data = self.conn.recv_line()
         if not data:
-            print("Server disconnected")
-            return
-
+            return []
         parts = data.split("|")
-
         if parts[0] == p.EMPTY:
-            print("No files on server")
-            return
+            return []
+        result = []
+        for entry in parts[1:]:
+            if ":" in entry:
+                name, size = entry.rsplit(":", 1)
+                result.append((name, int(size)))
+            else:
+                result.append((entry, 0))
+        return result
 
-        print("\nFiles from server:")
-        for f in parts[1:]:
-            print("-", f)
-
-    def download_file(self, filename):
+    def download_file(self, filename, on_progress=None):
         filename = os.path.basename(filename)
         self.conn.send_line(f"{p.GET}|{filename}")
-        
+
         header = self.conn.recv_line()
-        
         if not header or "|" not in header:
-            print("Malformed header")
-            return
-        
+            return False, None
+
         parts = header.split("|")
-        
-        if parts[0] == p.ERROR:
-            print("Error:", parts[1])
-            return
-
-        if parts[0] != p.FILE:
-            print("Unexpected response:", parts[0])
-            return
-
-        if len(parts) < 3:
-            print("Invalid server response")
-            return
+        if parts[0] == p.ERROR or parts[0] != p.FILE or len(parts) < 3:
+            return False, None
 
         try:
             size = int(parts[2])
         except ValueError:
-            print("Invalid size from server")
-            return
-        
+            return False, None
+
         if size < 0:
-            print("Invalid size")
-            return        
-        
-        base,ext = os.path.splitext(filename)
+            return False, None
+
+        base, ext = os.path.splitext(filename)
         safe_name = f"{base}_downloaded{ext}"
-        
-        print(f"Starting download: {safe_name} ({size} bytes)...")
-        
         save_path = os.path.join(DOWNLOAD_DIR, safe_name)
-        
+
         with open(save_path, "wb") as f:
             received = 0
-            
             while received < size:
                 chunk = self.conn.recv_bytes(min(p.CHUNK_SIZE, size - received))
                 if not chunk:
-                    print("Connection lost during download")
-                    break
-
+                    return False, None
                 f.write(chunk)
                 received += len(chunk)
-            
-        if received == size:
-            print(f"Downloaded {safe_name} successfully")
-            
-        else:
-            print(f"Download incomplete ({received}/{size} bytes)")
-        
+                if on_progress:
+                    on_progress(received, size)
+
+        return True, save_path  
+
     def close(self):
         try:
             self.conn.close()

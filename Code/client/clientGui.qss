@@ -74,8 +74,8 @@ QLineEdit#searchBar:focus {
     background-color: #404040;
 }
 
-/* ── File list ────────────────────────────────────────────────────────── */
-QListWidget#fileList {
+/* ── File list (TreeWidget) ───────────────────────────────────────────── */
+QTreeWidget#fileList {
     background-color: #3a3a3a;
     border: 2px solid #555555;
     border-radius: 8px;
@@ -85,25 +85,42 @@ QListWidget#fileList {
     font-family: "Segoe UI";
 }
 
-QListWidget#fileList::item {
+QTreeWidget#fileList::item {
     padding: 6px;
     border-radius: 4px;
     color: #ffffff;
 }
 
-QListWidget#fileList::item:hover {
+QTreeWidget#fileList::item:hover {
     background-color: #505050;
 }
 
-QListWidget#fileList::item:selected {
+QTreeWidget#fileList::item:selected {
     background-color: #4a90e2;
     color: #ffffff;
 }
 
-QListWidget#fileList::item:selected:hover {
+QTreeWidget#fileList::item:selected:hover {
     background-color: #357abd;
 }
 
+QHeaderView::section {
+    background-color: #2b2b2b;
+    color: #888888;
+    font-size: 11px;
+    font-weight: bold;
+    letter-spacing: 1px;
+    padding: 4px 8px;
+    border: none;
+    border-bottom: 1px solid #444444;
+}
+
+QHeaderView::section:hover {
+    background-color: #333333;
+    color: #4a90e2;
+}
+
+/* ── Scrollbars ───────────────────────────────────────────────────────── */
 QScrollBar:vertical {
     background: #3a3a3a;
     width: 8px;
@@ -125,7 +142,7 @@ QScrollBar::sub-line:vertical {
     height: 0;
 }
 
-/* ── Buttons — chung ──────────────────────────────────────────────────── */
+/* ── Buttons ──────────────────────────────────────────────────────────── */
 QPushButton {
     background-color: #4a90e2;
     color: #ffffff;
@@ -150,7 +167,7 @@ QPushButton:disabled {
     color: #aaaaaa;
 }
 
-/* ── Refresh button (ghost style) ─────────────────────────────────────── */
+/* ── Refresh button ───────────────────────────────────────────────────── */
 QPushButton#refreshBtn {
     background-color: transparent;
     border: 2px solid #4a90e2;
@@ -176,7 +193,7 @@ QPushButton#refreshBtn:disabled {
     background-color: transparent;
 }
 
-/* ── Download button (primary) ────────────────────────────────────────── */
+/* ── Download button ──────────────────────────────────────────────────── */
 QPushButton#downloadBtn {
     background-color: #4a90e2;
     color: #ffffff;
@@ -261,6 +278,10 @@ QLabel#downloadStatus[state="done"] {
     color: #5cb85c;
 }
 
+QLabel#downloadStatus[state="error"] {
+    color: #e25555;
+}
+
 QLabel#downloadInfo {
     font-size: 11px;
     color: #666666;
@@ -297,7 +318,7 @@ QStatusBar#mainStatusBar::item {
     border: none;
 }
 
-/* ── Scrollbar trong download panel ──────────────────────────────────── */
+/* ── Scrollbar in download panel ──────────────────────────────────────── */
 QScrollArea#downloadScroll QScrollBar:vertical {
     background: #2b2b2b;
     width: 6px;
