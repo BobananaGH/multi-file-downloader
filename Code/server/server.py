@@ -2,6 +2,7 @@ import socket
 import os
 import threading
 import time
+import ssl
 from shared import protocol as p
 from shared.utils import log
 
@@ -121,11 +122,18 @@ class ServerEngine:
             self.active_clients = {}
 
         try:
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(
+                certfile=os.path.join(BASE_DIR, "..", "certs", "server.crt"),
+                keyfile=os.path.join(BASE_DIR, "..", "certs", "server.key")
+            )
+
             self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
             self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             self.server_socket.bind((self.host, self.port))
             self.server_socket.listen(5)
-            self.server_socket.settimeout(1.0)  # Use 1.0s timeout to allow check on self.is_running
+            self.server_socket = context.wrap_socket(self.server_socket, server_side=True)
+            self.server_socket.settimeout(1.0)
         except Exception as e:
             log("SERVER", f"Failed to start server: {e}")
             with self.lock:

@@ -1,5 +1,6 @@
 import os
 import socket
+import ssl
 from shared import protocol as p
 
 DOWNLOAD_DIR = os.path.join(os.path.dirname(__file__), "downloads")
@@ -7,9 +8,12 @@ os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 class Client:
     def __init__(self, host="127.0.0.1", port=5000):
+        context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+        context.load_verify_locations(os.path.join(os.path.dirname(__file__), "..", "certs", "server.crt"))
+        
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket = context.wrap_socket(self.socket, server_hostname="127.0.0.1")
         self.socket.connect((host, port))
-
         self.conn = p.Connection(self.socket)
         
     def list_files(self):

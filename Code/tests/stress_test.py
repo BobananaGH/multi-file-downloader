@@ -14,7 +14,7 @@ from client.client import Client
 # =========================
 HOST = "127.0.0.1"
 PORT = 5000
-NUM_CLIENTS = 10
+NUM_CLIENTS = 25
 FILE_TO_GET = "mountainous-landscape-with-fog.jpg"  # must exist in server/file_storage/
 
 # =========================
@@ -52,7 +52,7 @@ def simulate_client(client_id):
         # Check the downloaded file size
         base, ext = os.path.splitext(FILE_TO_GET)
         saved_name = f"{base}_downloaded{ext}"
-        saved_path = os.path.join(os.path.dirname(__file__), "client", "downloads", saved_name)
+        saved_path = os.path.join(os.path.dirname(__file__), "..", "client", "downloads", saved_name)
 
         bytes_received = os.path.getsize(saved_path) if os.path.exists(saved_path) else 0
 
