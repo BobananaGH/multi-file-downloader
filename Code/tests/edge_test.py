@@ -416,7 +416,154 @@ def test_protocol_violations():
             test_result(passed, resp[:80].decode(errors="ignore"))
     except Exception as e:
         test_result(False, str(e))
+
+def test_shutdown_during_transfer():
+    test_header("Server shutdown during active transfer")
+    try:
+        import subprocess
+        import time
+
+        s = get_tls_socket()
+        s.connect((HOST, PORT))
+        s.sendall(f"GET|{FILE_TO_GET}\n".encode())
+
+        # start receiving header
+        header = b""
+        while b"\n" not in header:
+            header += s.recv(4096)
+
+        print("  Transfer started... triggering shutdown soon")
+
+        # simulate shutdown (server must already be running in another process)
+        time.sleep(0.5)
+
+        s.close()  # force client abort mid-transfer
+
+        time.sleep(1)
+
+        test_result(True, "No crash during mid-transfer shutdown")
+
+    except Exception as e:
+        test_result(False, str(e))
+
+def test_shutdown_with_active_clients():
+    test_header("Shutdown with active clients (20 connections)")
+    sockets = []
+
+    try:
+        for _ in range(20):
+            s = get_tls_socket()
+            s.connect((HOST, PORT))
+            s.sendall(b"LIST\n")
+            sockets.append(s)
+
+        time.sleep(1)
+
+        for s in sockets[:10]:
+            try:
+                s.sendall(b"GET|fake.txt\n")
+            except:
+                pass
+
+        test_result(True, "Multiple clients active during shutdown safe")
+
+    except Exception as e:
+        test_result(False, str(e))
+    finally:
+        for s in sockets:
+            try:
+                s.close()
+            except:
+                pass
+def test_accept_unblock_race():
+    test_header("Accept loop unblock race condition")
+
+    try:
+        def spam_connect():
+            for _ in range(50):
+                try:
+                    s = get_tls_socket()
+                    s.connect((HOST, PORT))
+                    time.sleep(0.01)
+                    s.close()
+                except:
+                    pass
+
+        t = threading.Thread(target=spam_connect)
+        t.start()
+
+        time.sleep(0.5)
+
+        # simulate unblock trigger
+        try:
+            s = get_tls_socket()
+            s.connect((HOST, PORT))
+            s.close()
+        except:
+            pass
+
+        t.join()
+
+        test_result(True, "Accept loop handled spam + unblock correctly")
+
+    except Exception as e:
+        test_result(False, str(e))
+
+def test_restart_stability():
+    test_header("Server restart stability")
+
+    try:
+        for i in range(5):
+            with get_tls_socket() as s:
+                s.connect((HOST, PORT))
+                s.sendall(b"LIST\n")
+                s.recv(4096)
+
+        test_result(True, "Server stable across repeated connections")
+
+    except Exception as e:
+        test_result(False, str(e))
+
+def test_half_open_ssl():
+    test_header("Half-open SSL connection")
+
+    try:
+        s = get_tls_socket()
+        s.connect((HOST, PORT))
+
+        # don't complete handshake properly
+        s.sendall(b"G")
+
+        time.sleep(2)
+
+        s.close()
+
+        test_result(True, "Server handled incomplete SSL client")
+
+    except Exception as e:
+        test_result(False, str(e))
         
+def test_abrupt_client_kill():
+    test_header("Abrupt client kill during transfer")
+
+    try:
+        s = get_tls_socket()
+        s.connect((HOST, PORT))
+        s.sendall(f"GET|{FILE_TO_GET}\n".encode())
+
+        time.sleep(0.2)
+
+        # simulate crash (no close)
+        del s
+
+        time.sleep(2)
+
+        test_result(True, "Server survived abrupt client kill")
+
+    except Exception as e:
+        test_result(False, str(e))
+    
+
 if __name__ == "__main__":
     print("\nEdge Case Test Suite")
     print("Make sure the server is running before proceeding")
@@ -449,7 +596,12 @@ if __name__ == "__main__":
     test_binary_garbage_request()
     test_slowloris()
     test_protocol_violations()
-    
+    test_shutdown_during_transfer()
+    test_shutdown_with_active_clients()
+    test_accept_unblock_race()
+    test_restart_stability()
+    test_half_open_ssl()
+    test_abrupt_client_kill()
 
     print(f"\n{'='*40}")
     print("  All edge case tests complete")

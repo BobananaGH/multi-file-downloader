@@ -69,7 +69,14 @@ class ServerEngine:
                 callback(stats)
             except Exception as e:
                 log("ERROR", f"Error in status callback: {e}")
-
+                
+    def _unblock_accept(self):
+        try:
+            dummy = socket.create_connection((self.host, self.port), timeout=0.5)
+            dummy.close()
+        except:
+            pass
+    
     def get_stats(self):
         """Retrieve thread-safe server statistics and active client list."""
         with self.lock:
@@ -133,12 +140,15 @@ class ServerEngine:
                 keyfile=os.path.join(BASE_DIR, "..", "certs", "server.key")
             )
 
-            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind((self.host, self.port))
-            self.server_socket.listen(5)
-            self.server_socket = context.wrap_socket(self.server_socket, server_side=True)
-            self.server_socket.settimeout(1.0)
+            raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            raw_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            raw_sock.bind((self.host, self.port))
+            raw_sock.listen(5)
+
+            ssl_sock = context.wrap_socket(raw_sock, server_side=True)
+            ssl_sock.settimeout(1.0)
+
+            self.server_socket = ssl_sock
         except Exception as e:
             log("SERVER", f"Failed to start server: {e}")
             with self.lock:
@@ -158,35 +168,45 @@ class ServerEngine:
         return True
 
     def stop(self):
-        """Gracefully stop the server, closing listener and all active client connections."""
         log("SERVER", "Stopping server...")
+
         with self.lock:
             if not self.is_running:
                 return
             self.is_running = False
 
-        # Close listening socket
+            clients = list(self.active_clients.items())
+            threads = [info["thread"] for info in self.active_clients.values()]
+
+            self.active_clients.clear()
+            
+        self._unblock_accept()
+        
+        # close server socket
         if self.server_socket:
             try:
                 self.server_socket.close()
-            except Exception as e:
-                log("ERROR", f"Error closing server socket: {e}")
+            except:
+                pass
 
-        # Close all active client connections
-        with self.lock:
-            clients = list(self.active_clients.items())
-
+        # close clients
         for addr, info in clients:
             try:
+                info["socket"].shutdown(socket.SHUT_RDWR)
+            except:
+                pass
+            try:
                 info["socket"].close()
-            except Exception as e:
-                log("ERROR", f"Error closing connection for {addr}: {e}")
+            except:
+                pass
 
-        # Join the listener thread
+        # join threads
+        for t in threads:
+            t.join(timeout=2.0)
+
         if self.listener_thread:
             self.listener_thread.join(timeout=2.0)
 
-        # Join speed thread
         if self.speed_thread:
             self.speed_thread.join(timeout=2.0)
 
@@ -211,9 +231,10 @@ class ServerEngine:
             with self.lock:
                 if not self.is_running:
                     break
-
+                sock = self.server_socket
+                
             try:
-                conn, addr = self.server_socket.accept()
+                conn, addr = sock.accept()
             except socket.timeout:
                 continue
             except Exception as e:
@@ -227,7 +248,7 @@ class ServerEngine:
             client_thread = threading.Thread(
                 target=self._handle_client_thread,
                 args=(conn, addr),
-                daemon=True
+                daemon=False
             )
             
             self._add_client(addr, conn, client_thread)
@@ -265,13 +286,16 @@ class ServerEngine:
     def _handle_client_thread(self, conn, addr):
         """Manage individual client protocol requests."""
         try:
+            conn.settimeout(0.3)
             connection = p.Connection(conn)
             while True:
                 with self.lock:
                     if not self.is_running:
                         break
-
-                request = connection.recv_line()
+                try:    
+                    request = connection.recv_line()
+                except socket.timeout:
+                    continue
                 if request is None:
                     break
 
@@ -318,7 +342,16 @@ class ServerEngine:
                                 chunk = f.read(p.CHUNK_SIZE)
                                 if not chunk:
                                     break
-                                conn.sendall(chunk)
+                                try:
+                                    conn.sendall(chunk)
+                                except (
+                                    socket.timeout,
+                                    BrokenPipeError,
+                                    ConnectionResetError,
+                                    ssl.SSLError,
+                                    OSError
+                                ):
+                                    break
                                 self._add_bytes_sent(len(chunk))
 
                         log("RESP", f"SEND {filename} ({size} bytes)")
@@ -334,6 +367,10 @@ class ServerEngine:
                 log("ERROR", f"Error handling client {addr}: {e}")
         finally:
             try:
+                try:
+                    conn.shutdown(socket.SHUT_RDWR)
+                except:
+                    pass
                 conn.close()
             except Exception:
                 pass

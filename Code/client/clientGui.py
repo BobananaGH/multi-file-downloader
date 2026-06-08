@@ -170,9 +170,15 @@ class DownloadItemWidget(QFrame):
         self.status_label.style().unpolish(self.status_label)
         self.status_label.style().polish(self.status_label)
 
-
+class SortableTreeItem(QTreeWidgetItem):
+    def __lt__(self, other):
+        col = self.treeWidget().sortColumn()
+        if col == 1:
+            return (self.data(1, Qt.UserRole) or 0) < (other.data(1, Qt.UserRole) or 0)
+        return self.text(col).lower() < other.text(col).lower()
+    
 class FileClientGUI(QMainWindow):
-    def __init__(self):
+    def __init__(self, auto_load=True):
         super().__init__()
         self.setWindowTitle("FLUX — Multi File Downloader")
         self.setMinimumSize(620, 700)
@@ -185,7 +191,8 @@ class FileClientGUI(QMainWindow):
 
         self._build_ui()
         self._load_styles()
-        self.load_files()
+        if auto_load:
+            self.load_files()
 
     def _build_ui(self):
         central = QWidget()
@@ -426,7 +433,7 @@ class FileClientGUI(QMainWindow):
         else:
             for name, size in files:
                 icon = get_file_icon(name)
-                item = QTreeWidgetItem([f"{icon}  {name}", self._format_size(size)])
+                item = SortableTreeItem([f"{icon}  {name}", self._format_size(size)])
                 item.setData(0, Qt.UserRole, name)
                 # store raw size as int for proper numeric sorting
                 item.setData(1, Qt.UserRole, size)
