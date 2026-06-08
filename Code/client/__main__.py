@@ -1,8 +1,15 @@
-from .client import Client
+import sys
+from PySide6.QtWidgets import QApplication
+from .clientGui import FileClientGUI
 
-client = Client()
+def main():
+    app = QApplication(sys.argv)
+    app.setStyle("Fusion")
 
-client.list_files()
-client.download_file("duck.jpg")
+    window = FileClientGUI()
+    window.show()
 
-client.close()
+    sys.exit(app.exec())
+
+if __name__ == "__main__":
+    main()
