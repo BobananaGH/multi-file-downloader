@@ -144,11 +144,9 @@ class ServerEngine:
             raw_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
             raw_sock.bind((self.host, self.port))
             raw_sock.listen(5)
-
-            ssl_sock = context.wrap_socket(raw_sock, server_side=True)
-            ssl_sock.settimeout(1.0)
-
-            self.server_socket = ssl_sock
+            raw_sock.settimeout(1.0)
+            self.server_socket = raw_sock  # raw socket only
+            self.ssl_context = context     # store context for per-connection wrapping
         except Exception as e:
             log("SERVER", f"Failed to start server: {e}")
             with self.lock:
@@ -235,6 +233,12 @@ class ServerEngine:
                 
             try:
                 conn, addr = sock.accept()
+                try:
+                    conn = self.ssl_context.wrap_socket(conn, server_side=True)
+                except ssl.SSLError as e:
+                    log("ERROR", f"SSL handshake failed for {addr}: {e}")
+                    conn.close()
+                    continue
             except socket.timeout:
                 continue
             except Exception as e:
@@ -267,8 +271,7 @@ class ServerEngine:
 
     def _remove_client(self, addr):
         with self.lock:
-            if addr in self.active_clients:
-                del self.active_clients[addr]
+            self.active_clients.pop(addr, None)
         log("CLIENT", f"Disconnected: {addr}")
         self._notify_status_change()
 
@@ -307,7 +310,7 @@ class ServerEngine:
                     self._update_client_action(addr, "Listing Files")
                     files = self.get_file_list()
                     p.send_line(conn, p.encode_list(files))
-                    log("RESP", f"LIST ({len(files)} files)")
+                    log("RESP", f"{addr} LIST ({len(files)} files)")
                     self._update_client_action(addr, "Idle")
 
                 elif command == p.GET:

@@ -59,11 +59,11 @@ class DownloadThread(QThread):
                 if self._cancelled:
                     return
                 now = time.time()
-                elapsed = now - start_time
+                elapsed = max(now - start_time, 0.1)
                 interval = now - last_time[0]
 
-                if interval > 0.1:
-                    speed_bytes_s = (received - last_bytes[0]) / interval
+                if interval > 0.2:
+                    speed_bytes_s = max((received - last_bytes[0]) / interval, 0)
                     last_bytes[0] = received
                     last_time[0] = now
                 else:
@@ -76,7 +76,7 @@ class DownloadThread(QThread):
                 self.progress.emit(self.filename, percent, speed_kb_s, eta)
 
             try:
-                success, save_path = c.download_file(self.filename, on_progress=on_progress)
+                success, save_path = c.download_file(self.filename, on_progress=on_progress, is_cancelled=lambda: self._cancelled)
                 if self._cancelled:
                     self.finished_file.emit(self.filename, False, "Cancelled")
                 else:
@@ -174,7 +174,7 @@ class SortableTreeItem(QTreeWidgetItem):
     def __lt__(self, other):
         col = self.treeWidget().sortColumn()
         if col == 1:
-            return (self.data(1, Qt.UserRole) or 0) < (other.data(1, Qt.UserRole) or 0)
+            return int(self.data(1, Qt.UserRole) or 0) < int(other.data(1, Qt.UserRole) or 0)
         return self.text(col).lower() < other.text(col).lower()
     
 class FileClientGUI(QMainWindow):
@@ -386,7 +386,12 @@ class FileClientGUI(QMainWindow):
     def _open_downloads_folder(self):
         path = os.path.join(os.path.dirname(__file__), "downloads")
         os.makedirs(path, exist_ok=True)
-        subprocess.Popen(f'explorer "{os.path.abspath(path)}"')
+        if sys.platform == "win32":
+            os.startfile(path)
+        elif sys.platform == "darwin":
+            subprocess.Popen(["open", path])
+        else:
+            subprocess.Popen(["xdg-open", path])
 
     # ------------------------------------------------------------------ #
     #  File List                                                           #
@@ -494,8 +499,9 @@ class FileClientGUI(QMainWindow):
                 break
 
     def _on_download_progress(self, filename: str, percent: int, speed: float, eta: float):
-        if filename in self._download_widgets:
-            self._download_widgets[filename].set_progress(percent, speed, eta)
+        widget = self._download_widgets.get(filename)
+        if widget:
+            widget.set_progress(percent, speed, eta)
 
     def _on_file_finished(self, filename: str, success: bool, save_path: str):
         if filename in self._download_widgets:
@@ -516,11 +522,22 @@ class FileClientGUI(QMainWindow):
             widget.deleteLater()
         self._download_widgets.clear()
         self.status_bar.showMessage("Download queue cleared")
-
+        
+    def closeEvent(self, event):
+        for thread in self._download_threads:
+            thread.cancel()
+            thread.wait(2000)
+        if hasattr(self, '_fetch_thread') and self._fetch_thread.isRunning():
+            self._fetch_thread.wait(2000)
+        event.accept()
+        
     def _cleanup_thread(self, thread):
         if thread in self._download_threads:
             self._download_threads.remove(thread)
-        thread.deleteLater()
+        try:
+            thread.deleteLater()
+        except RuntimeError:
+            pass
 
 
 if __name__ == "__main__":

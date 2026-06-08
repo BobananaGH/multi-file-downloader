@@ -33,36 +33,50 @@ class Client:
                 result.append((entry, 0))
         return result
 
-    def download_file(self, filename, on_progress=None):
+    def download_file(self, filename, on_progress=None, is_cancelled=None):
         filename = os.path.basename(filename)
         self.conn.send_line(f"{p.GET}|{filename}")
 
         header = self.conn.recv_line()
         if not header or "|" not in header:
-            return False, None
+            self.close()
+            return False, "No header received"
 
         parts = header.split("|")
-        if parts[0] == p.ERROR or parts[0] != p.FILE or len(parts) < 3:
-            return False, None
+        if parts[0] == p.ERROR:
+            return False, parts[1] if len(parts) > 1 else "Server error"
+        if parts[0] != p.FILE or len(parts) < 3:
+            self.close()
+            return False, "Malformed header"
 
         try:
             size = int(parts[2])
         except ValueError:
-            return False, None
+            self.close()
+            return False, "Invalid size"
 
         if size < 0:
-            return False, None
+            self.close()
+            return False, "Invalid size"
 
         base, ext = os.path.splitext(filename)
         safe_name = f"{base}_downloaded{ext}"
         save_path = os.path.join(DOWNLOAD_DIR, safe_name)
 
+        counter = 1
+        while os.path.exists(save_path):
+            safe_name = f"{base}_downloaded_{counter}{ext}"
+            save_path = os.path.join(DOWNLOAD_DIR, safe_name)
+            counter += 1
         with open(save_path, "wb") as f:
             received = 0
             while received < size:
+                if is_cancelled and is_cancelled():
+                    return False, "Cancelled"
                 chunk = self.conn.recv_bytes(min(p.CHUNK_SIZE, size - received))
                 if not chunk:
-                    return False, None
+                    self.close()
+                    return False, "Connection lost"
                 f.write(chunk)
                 received += len(chunk)
                 if on_progress:
