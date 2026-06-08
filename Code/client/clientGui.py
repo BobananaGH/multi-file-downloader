@@ -373,7 +373,7 @@ class FileClientGUI(QMainWindow):
 
             thread = DownloadThread(filename)
             thread.progress.connect(self._on_download_progress)
-            thread.file_finished.connect(self._on_file_finished)
+            thread.finished_file.connect(self._on_file_finished)
             thread.finished.connect(lambda t=thread: self._cleanup_thread(t))
             thread.start()
             self._download_threads.append(thread)
@@ -476,7 +476,7 @@ class FileClientGUI(QMainWindow):
         for filename in to_download:
             thread = DownloadThread(filename)
             thread.progress.connect(self._on_download_progress)
-            thread.file_finished.connect(self._on_file_finished)
+            thread.finished_file.connect(self._on_file_finished)
             thread.finished.connect(lambda t=thread: self._cleanup_thread(t))
             thread.start()
             self._download_threads.append(thread)
