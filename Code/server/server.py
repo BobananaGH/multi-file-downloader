@@ -406,8 +406,7 @@ class ServerEngine:
                         except Exception as e:
                             log("ERROR", f"Error sending file {filename} to {addr}: {e}")
                         finally:
-                            with self.lock:
-                                self._record_download(addr, filename, size, bytes_sent, success)
+                            self._record_download(addr, filename, size, bytes_sent, success)
 
                         if success and bytes_sent == size:
                             log("RESP", f"SEND {filename} ({size} bytes) successfully")
