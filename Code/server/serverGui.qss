@@ -1,0 +1,40 @@
+QMainWindow {
+    background-color: #f5f7fb;
+}
+
+QLabel#appTitle {
+    font-size: 28px;
+    font-weight: bold;
+    color: #1f2937;
+}
+
+QLabel#sectionLabel {
+    font-size: 14px;
+    font-weight: bold;
+    color: #374151;
+}
+
+QLabel#statusLabel {
+    font-size: 16px;
+    font-weight: bold;
+    color: #2563eb;
+}
+
+QPushButton {
+    padding: 8px 14px;
+    border-radius: 8px;
+    background-color: #2563eb;
+    color: white;
+    font-weight: bold;
+}
+
+QPushButton:hover {
+    background-color: #1d4ed8;
+}
+
+QTextEdit, QTreeWidget {
+    background-color: white;
+    border: 1px solid #d1d5db;
+    border-radius: 8px;
+    padding: 8px;
+}
