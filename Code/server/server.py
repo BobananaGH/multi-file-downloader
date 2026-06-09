@@ -2,6 +2,7 @@ import socket
 import os
 import threading
 import time
+import ssl
 from shared import protocol as p
 from shared.utils import log
 
@@ -26,7 +27,6 @@ class ServerEngine:
         self.lock = threading.Lock()
         
         # Active connections tracker
-        # Format: { addr_tuple: { "socket": conn, "thread": t, "connect_time": float, "current_action": str } }
         self.active_clients = {}
         
         # Metrics and statistics
@@ -40,6 +40,10 @@ class ServerEngine:
         
         # Callbacks for GUI notifications
         self.status_callbacks = []
+        
+        # Download history and counts
+        self.download_history = []
+        self.download_counts = {}
 
     def register_status_callback(self, callback):
         """Register a callback function to receive server status/metrics updates."""
@@ -68,7 +72,14 @@ class ServerEngine:
                 callback(stats)
             except Exception as e:
                 log("ERROR", f"Error in status callback: {e}")
-
+                
+    def _unblock_accept(self):
+        try:
+            dummy = socket.create_connection((self.host, self.port), timeout=0.5)
+            dummy.close()
+        except:
+            pass
+    
     def get_stats(self):
         """Retrieve thread-safe server statistics and active client list."""
         with self.lock:
@@ -95,13 +106,58 @@ class ServerEngine:
                 "active_connections_count": len(self.active_clients),
                 "active_clients": clients_info,
                 "total_bytes_sent": self.total_bytes_sent,
-                "upload_speed_kbps": self.current_upload_speed / 1024.0
+                "upload_speed_kbps": self.current_upload_speed / 1024.0,
+                "download_history": list(self.download_history),
+                "download_counts": dict(self.download_counts)
             }
 
+    def _record_download(self, addr, filename, total_size, bytes_sent, success):
+        status = "Success" if success and bytes_sent == total_size else "Failed/Incomplete"
+        event = {
+            "timestamp": time.time(),
+            "ip": addr[0],
+            "port": addr[1],
+            "filename": filename,
+            "total_size": total_size,
+            "bytes_sent": bytes_sent,
+            "status": status
+        }
+        with self.lock:
+            self.download_history.append(event)
+            if len(self.download_history) > 1000:
+                self.download_history.pop(0)
+            if status == "Success":
+                self.download_counts[filename] = self.download_counts.get(filename, 0) + 1
+        self._notify_status_change()
+
+    def kick_client(self, ip, port):
+        """Forcefully disconnect a client connection by IP and Port."""
+        target_addr = (ip, int(port))
+        with self.lock:
+            if target_addr in self.active_clients:
+                info = self.active_clients[target_addr]
+                sock = info["socket"]
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except:
+                    pass
+                try:
+                    sock.close()
+                except:
+                    pass
+                log("SERVER", f"Kicked client {target_addr}")
+                return True
+        return False
+
     def get_file_list(self):
-        """Retrieve the list of files stored in server file storage."""
         try:
-            return os.listdir(self.storage_dir)
+            files = os.listdir(self.storage_dir)
+            result = []
+            for f in files:
+                path = os.path.join(self.storage_dir, f)
+                size = os.path.getsize(path)
+                result.append((f, size))
+            return result
         except Exception as e:
             log("ERROR", f"Failed to list directory {self.storage_dir}: {e}")
             return []
@@ -121,11 +177,19 @@ class ServerEngine:
             self.active_clients = {}
 
         try:
-            self.server_socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-            self.server_socket.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-            self.server_socket.bind((self.host, self.port))
-            self.server_socket.listen(5)
-            self.server_socket.settimeout(1.0)  # Use 1.0s timeout to allow check on self.is_running
+            context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+            context.load_cert_chain(
+                certfile=os.path.join(BASE_DIR, "..", "certs", "server.crt"),
+                keyfile=os.path.join(BASE_DIR, "..", "certs", "server.key")
+            )
+
+            raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            raw_sock.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            raw_sock.bind((self.host, self.port))
+            raw_sock.listen(5)
+            raw_sock.settimeout(1.0)
+            self.server_socket = raw_sock  # raw socket only
+            self.ssl_context = context     # store context for per-connection wrapping
         except Exception as e:
             log("SERVER", f"Failed to start server: {e}")
             with self.lock:
@@ -145,35 +209,44 @@ class ServerEngine:
         return True
 
     def stop(self):
-        """Gracefully stop the server, closing listener and all active client connections."""
         log("SERVER", "Stopping server...")
+
         with self.lock:
             if not self.is_running:
                 return
             self.is_running = False
 
-        # Close listening socket
+            clients = list(self.active_clients.items())
+            threads = [info["thread"] for info in self.active_clients.values()]
+            self.active_clients.clear()
+            
+        self._unblock_accept()
+        
+        # close server socket
         if self.server_socket:
             try:
                 self.server_socket.close()
-            except Exception as e:
-                log("ERROR", f"Error closing server socket: {e}")
+            except:
+                pass
 
-        # Close all active client connections
-        with self.lock:
-            clients = list(self.active_clients.items())
-
+        # close clients
         for addr, info in clients:
             try:
+                info["socket"].shutdown(socket.SHUT_RDWR)
+            except:
+                pass
+            try:
                 info["socket"].close()
-            except Exception as e:
-                log("ERROR", f"Error closing connection for {addr}: {e}")
+            except:
+                pass
 
-        # Join the listener thread
+        # join threads
+        for t in threads:
+            t.join(timeout=2.0)
+
         if self.listener_thread:
             self.listener_thread.join(timeout=2.0)
 
-        # Join speed thread
         if self.speed_thread:
             self.speed_thread.join(timeout=2.0)
 
@@ -198,9 +271,16 @@ class ServerEngine:
             with self.lock:
                 if not self.is_running:
                     break
-
+                sock = self.server_socket
+                
             try:
-                conn, addr = self.server_socket.accept()
+                conn, addr = sock.accept()
+                try:
+                    conn = self.ssl_context.wrap_socket(conn, server_side=True)
+                except ssl.SSLError as e:
+                    log("ERROR", f"SSL handshake failed for {addr}: {e}")
+                    conn.close()
+                    continue
             except socket.timeout:
                 continue
             except Exception as e:
@@ -214,7 +294,7 @@ class ServerEngine:
             client_thread = threading.Thread(
                 target=self._handle_client_thread,
                 args=(conn, addr),
-                daemon=True
+                daemon=False
             )
             
             self._add_client(addr, conn, client_thread)
@@ -233,8 +313,7 @@ class ServerEngine:
 
     def _remove_client(self, addr):
         with self.lock:
-            if addr in self.active_clients:
-                del self.active_clients[addr]
+            self.active_clients.pop(addr, None)
         log("CLIENT", f"Disconnected: {addr}")
         self._notify_status_change()
 
@@ -252,13 +331,16 @@ class ServerEngine:
     def _handle_client_thread(self, conn, addr):
         """Manage individual client protocol requests."""
         try:
+            conn.settimeout(0.3)
             connection = p.Connection(conn)
             while True:
                 with self.lock:
                     if not self.is_running:
                         break
-
-                request = connection.recv_line()
+                try:    
+                    request = connection.recv_line()
+                except socket.timeout:
+                    continue
                 if request is None:
                     break
 
@@ -270,7 +352,7 @@ class ServerEngine:
                     self._update_client_action(addr, "Listing Files")
                     files = self.get_file_list()
                     p.send_line(conn, p.encode_list(files))
-                    log("RESP", f"LIST ({len(files)} files)")
+                    log("RESP", f"{addr} LIST ({len(files)} files)")
                     self._update_client_action(addr, "Idle")
 
                 elif command == p.GET:
@@ -280,6 +362,12 @@ class ServerEngine:
                         continue
 
                     filename = os.path.basename(parts[1])
+                    
+                    if not filename:
+                        p.send_line(conn, p.encode_error("Invalid filename"))
+                        log("ERROR", f"Empty filename from {addr}")
+                        continue
+                    
                     filepath = os.path.join(self.storage_dir, filename)
 
                     if not os.path.exists(filepath):
@@ -291,18 +379,40 @@ class ServerEngine:
                         
                         p.send_line(conn, p.encode_file_header(filename, size))
 
-                        with open(filepath, "rb") as f:
-                            while True:
-                                with self.lock:
-                                    if not self.is_running:
+                        bytes_sent = 0
+                        success = False
+                        try:
+                            with open(filepath, "rb") as f:
+                                while True:
+                                    with self.lock:
+                                        if not self.is_running:
+                                            break
+                                    chunk = f.read(p.CHUNK_SIZE)
+                                    if not chunk:
+                                        success = True
                                         break
-                                chunk = f.read(p.CHUNK_SIZE)
-                                if not chunk:
-                                    break
-                                conn.sendall(chunk)
-                                self._add_bytes_sent(len(chunk))
+                                    try:
+                                        conn.sendall(chunk)
+                                    except (
+                                        socket.timeout,
+                                        BrokenPipeError,
+                                        ConnectionResetError,
+                                        ssl.SSLError,
+                                        OSError
+                                    ):
+                                        break
+                                    bytes_sent += len(chunk)
+                                    self._add_bytes_sent(len(chunk))
+                        except Exception as e:
+                            log("ERROR", f"Error sending file {filename} to {addr}: {e}")
+                        finally:
+                            with self.lock:
+                                self._record_download(addr, filename, size, bytes_sent, success)
 
-                        log("RESP", f"SEND {filename} ({size} bytes)")
+                        if success and bytes_sent == size:
+                            log("RESP", f"SEND {filename} ({size} bytes) successfully")
+                        else:
+                            log("RESP", f"SEND {filename} ({bytes_sent}/{size} bytes) failed/interrupted")
                         self._update_client_action(addr, "Idle")
                 else:
                     log("ERROR", f"Unknown command from {addr}: {request}")
@@ -315,6 +425,10 @@ class ServerEngine:
                 log("ERROR", f"Error handling client {addr}: {e}")
         finally:
             try:
+                try:
+                    conn.shutdown(socket.SHUT_RDWR)
+                except:
+                    pass
                 conn.close()
             except Exception:
                 pass
