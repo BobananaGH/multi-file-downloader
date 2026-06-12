@@ -1,13 +1,11 @@
 import sys
 import os
-import uuid
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QLineEdit, QScrollArea, QFrame, QMainWindow, QTreeWidget, QTreeWidgetItem, QHeaderView, QMessageBox
 )
-from functools import partial
 from PySide6.QtCore import Qt
 from shared.icons import get_file_icon
 from client.gui.widgets import DownloadItemWidget, SortableTreeItem
@@ -26,7 +24,6 @@ class FileClientGUI(QMainWindow):
         self._filtered_files: list[tuple[str, int]] = []
         self._download_widgets: dict[str, DownloadItemWidget] = {}
         self._threads: dict[str, DownloadThread] = {}
-        self._thread_by_file: dict[str, str] = {}
 
         self._build_ui()
         self._load_styles()
@@ -177,18 +174,13 @@ class FileClientGUI(QMainWindow):
             print("QSS load failed:", e)
 
     def _register_thread(self, thread: DownloadThread):
-        thread_id = str(uuid.uuid4())
         filename = thread.filename
+        self._threads[filename] = thread
 
-        self._threads[thread_id] = thread
-        self._thread_by_file[filename] = thread_id
+        def cleanup(*args):
+            self._threads.pop(filename, None)
 
-        def cleanup(tid=thread_id, fname=filename):
-            self._threads.pop(tid, None)
-            if self._thread_by_file.get(fname) == tid:
-                self._thread_by_file.pop(fname, None)
-
-        thread.finished.connect(cleanup)
+        thread.finished_file.connect(cleanup)
         thread.finished.connect(thread.deleteLater)
     
     def load_files(self):
@@ -256,7 +248,7 @@ class FileClientGUI(QMainWindow):
             pos,
             filename,
             self._start_download,
-            lambda: open_downloads_folder(os.path.join(os.getcwd(), "downloads"))
+            lambda: open_downloads_folder(os.path.join(os.path.dirname(__file__), "..", "downloads"))
         )
     
     def _filter_files(self, query: str):
@@ -265,12 +257,13 @@ class FileClientGUI(QMainWindow):
         self._render_file_list(self._filtered_files)
 
     def _start_download(self, filename: str):
-        if filename in self._download_widgets:
+        if filename in self._download_widgets or filename in self._threads:
             self.status_bar.showMessage(
                 f"{filename} is already in the download queue"
             )
             return
 
+        # UI widget first
         widget = DownloadItemWidget(filename)
         widget.cancel_requested.connect(self._on_cancel_requested)
 
@@ -278,78 +271,34 @@ class FileClientGUI(QMainWindow):
         self.downloads_layout.insertWidget(idx, widget)
         self._download_widgets[filename] = widget
 
+        # single thread instance
         thread = DownloadThread(filename)
+
+        self._register_thread(thread)
+
         thread.progress.connect(self._on_download_progress)
         thread.finished_file.connect(self._on_file_finished)
-        self._register_thread(thread)
+
         thread.start()
 
         self.status_bar.showMessage(f"Downloading {filename}...")
 
     def _on_download_selected(self):
-        selected = [
-            item.data(0, Qt.UserRole)
-            for item in self.list_widget.selectedItems()
-        ]
-
+        selected = [item.data(0, Qt.UserRole) for item in self.list_widget.selectedItems()]
         if not selected:
-            QMessageBox.information(
-                self,
-                "No Selection",
-                "Please select at least one file to download."
-            )
-            self.status_bar.showMessage("Please select at least one file to download.")
+            QMessageBox.information(self, "No Selection", "Please select at least one file.")
             return
-
-        to_download = []
-        
         for filename in selected:
-            if not filename:
-                continue
+            if filename:
+                self._start_download(filename)
+            
+    def _on_cancel_requested(self, filename: str):
+        thread = self._threads.get(filename)
 
-            if filename in self._download_widgets:
-                continue
-
-            widget = DownloadItemWidget(filename)
-            widget.cancel_requested.connect(self._on_cancel_requested)
-
-            idx = self.downloads_layout.count() - 1
-            self.downloads_layout.insertWidget(idx, widget)
-
-            self._download_widgets[filename] = widget
-            to_download.append(filename)
-
-        if not to_download:
-            self.status_bar.showMessage(
-                "Selected files are already in the download queue"
-            )
+        if not thread:
             return
 
-        self.status_bar.showMessage(
-            f"Downloading {len(to_download)} file{'s' if len(to_download) != 1 else ''}..."
-        )
-        for filename in to_download:
-            thread = DownloadThread(filename)
-
-            thread.progress.connect(self._on_download_progress)
-            thread.finished_file.connect(self._on_file_finished)
-
-            thread.finished.connect(partial(self._cleanup_thread, thread))
-            thread.finished.connect(thread.deleteLater)
-
-            self._threads[filename] = thread
-            thread.start()
-    
-    def _on_cancel_requested(self, filename: str):
-        thread_id = self._thread_by_file.get(filename)
-        thread = self._threads.get(thread_id)
-
-        if thread:
-            thread.cancel()
-
-        widget = self._download_widgets.get(filename)
-        if widget:
-            widget.set_cancelled()
+        thread.cancel()
 
     def _on_download_progress(self, filename: str, percent: int, speed: float, eta: float):
         widget = self._download_widgets.get(filename)
@@ -372,7 +321,6 @@ class FileClientGUI(QMainWindow):
     def _clear_downloads(self):
         for thread in list(self._threads.values()):
             thread.cancel()
-            thread.wait(2000)
 
         for widget in self._download_widgets.values():
             self.downloads_layout.removeWidget(widget)
@@ -386,21 +334,14 @@ class FileClientGUI(QMainWindow):
     def closeEvent(self, event):
         if hasattr(self, "_fetch_thread"):
             try:
-                self._fetch_thread.quit()
                 self._fetch_thread.wait(2000)
             except RuntimeError:
-                pass  
+                pass
 
         for thread in list(self._threads.values()):
             thread.cancel()
-            thread.quit()
-            thread.wait(2000)
 
         event.accept()
-
-    def _cleanup_thread(self, thread):
-        filename = thread.filename
-        self._threads.pop(filename, None)
         
 if __name__ == "__main__":
     app = QApplication(sys.argv)

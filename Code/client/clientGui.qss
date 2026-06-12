@@ -378,3 +378,7 @@ QMenu::separator {
     background: #444444;
     margin: 6px 4px;
 }
+
+QLabel#downloadStatus[state="cancelled"] {
+    color: #888888;
+}

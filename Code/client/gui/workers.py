@@ -2,7 +2,7 @@
 
 import time
 from PySide6.QtCore import QThread, Signal
-from client.client import Client
+from ..client import Client
 
 class FetchFilesThread(QThread):
     files_received = Signal(list)

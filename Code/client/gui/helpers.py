@@ -4,7 +4,6 @@ import os
 import sys
 import subprocess
 
-
 def format_size(size: int) -> str:
     if size < 1024:
         return f"{size} B"
