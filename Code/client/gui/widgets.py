@@ -12,6 +12,13 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal
 from shared.icons import get_file_icon
 
+class DownloadState:
+    QUEUED = "queued"
+    ACTIVE = "active"
+    DONE = "done"
+    ERROR = "error"
+    CANCELLED = "cancelled"
+
 class DownloadItemWidget(QFrame):
     cancel_requested = Signal(str)
 
@@ -52,48 +59,60 @@ class DownloadItemWidget(QFrame):
 
         self.info_label = QLabel("Waiting to start...")
         self.info_label.setObjectName("downloadInfo")
+        
+        self._update_state(DownloadState.QUEUED)
 
         layout.addLayout(top_row)
         layout.addWidget(self.progress_bar)
         layout.addWidget(self.info_label)
 
+    def _update_state(self, state: str):
+        if self.status_label.property("state") != state:
+            self.status_label.setProperty("state", state)
+            self.status_label.style().unpolish(self.status_label)
+            self.status_label.style().polish(self.status_label)
+    
     def set_progress(self, value: int, speed_kbps: float = 0, eta: float = 0):
         self.progress_bar.setValue(value)
+
         if value >= 100:
             self.status_label.setText("✓ Done")
-            self.status_label.setProperty("state", "done")
+            self._update_state(DownloadState.DONE)
             self.info_label.setText("Download complete")
             self.cancel_btn.setVisible(False)
+
         elif value > 0:
             self.status_label.setText(f"{value}%")
-            self.status_label.setProperty("state", "active")
+            self._update_state(DownloadState.ACTIVE)
+
             speed_str = f"{speed_kbps:.1f} KB/s" if speed_kbps < 1024 else f"{speed_kbps/1024:.1f} MB/s"
             eta_str = f"{int(eta)}s left" if eta > 0 else ""
             self.info_label.setText(f"Downloading... {value}%  •  {speed_str}  •  {eta_str}")
-        self.status_label.style().unpolish(self.status_label)
-        self.status_label.style().polish(self.status_label)
 
     def set_error(self, reason: str = "Download failed"):
         self.progress_bar.setValue(0)
         self.status_label.setText("✗ Failed")
-        self.status_label.setProperty("state", "error")
+        self._update_state(DownloadState.ERROR)
         self.info_label.setText(reason)
         self.cancel_btn.setVisible(False)
-        self.status_label.style().unpolish(self.status_label)
-        self.status_label.style().polish(self.status_label)
 
     def set_cancelled(self):
         self.status_label.setText("— Cancelled")
-        self.status_label.setProperty("state", "error")
+        self._update_state(DownloadState.CANCELLED)
         self.info_label.setText("Cancelled by user")
         self.cancel_btn.setVisible(False)
-        self.status_label.style().unpolish(self.status_label)
-        self.status_label.style().polish(self.status_label)
-
-
+        
+    def reset(self):
+        self.progress_bar.setValue(0)
+        self.status_label.setText("Queued")
+        self._update_state(DownloadState.QUEUED)
+        self.info_label.setText("Waiting to start...")
+        self.cancel_btn.setVisible(True)
+        
 class SortableTreeItem(QTreeWidgetItem):
     def __lt__(self, other):
         col = self.treeWidget().sortColumn()
         if col == 1:
             return int(self.data(1, Qt.UserRole) or 0) < int(other.data(1, Qt.UserRole) or 0)
         return self.text(col).lower() < other.text(col).lower()
+

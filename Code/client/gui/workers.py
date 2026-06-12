@@ -56,11 +56,11 @@ class DownloadThread(QThread):
                 else:
                     speed_bytes_s = (received / elapsed) if elapsed > 0 else 0
 
-                speed_kb_s = speed_bytes_s / 1024
+                speed_kbps = speed_bytes_s / 1024
                 remaining = total - received
                 eta = (remaining / speed_bytes_s) if speed_bytes_s >= 1 else 0
                 percent = 0 if total == 0 else int((received / total) * 100)
-                self.progress.emit(self.filename, percent, speed_kb_s, eta)
+                self.progress.emit(self.filename, percent, speed_kbps, eta)
 
             try:
                 success, save_path = c.download_file(self.filename, on_progress=on_progress, is_cancelled=lambda: self._cancelled)
