@@ -27,7 +27,6 @@ class ServerEngine:
         self.lock = threading.Lock()
         
         # Active connections tracker
-        # Format: { addr_tuple: { "socket": conn, "thread": t, "connect_time": float, "current_action": str } }
         self.active_clients = {}
         
         # Metrics and statistics
@@ -41,6 +40,10 @@ class ServerEngine:
         
         # Callbacks for GUI notifications
         self.status_callbacks = []
+        
+        # Download history and counts
+        self.download_history = []
+        self.download_counts = {}
 
     def register_status_callback(self, callback):
         """Register a callback function to receive server status/metrics updates."""
@@ -103,8 +106,48 @@ class ServerEngine:
                 "active_connections_count": len(self.active_clients),
                 "active_clients": clients_info,
                 "total_bytes_sent": self.total_bytes_sent,
-                "upload_speed_kbps": self.current_upload_speed / 1024.0
+                "upload_speed_kbps": self.current_upload_speed / 1024.0,
+                "download_history": list(self.download_history),
+                "download_counts": dict(self.download_counts)
             }
+
+    def _record_download(self, addr, filename, total_size, bytes_sent, success):
+        status = "Success" if success and bytes_sent == total_size else "Failed/Incomplete"
+        event = {
+            "timestamp": time.time(),
+            "ip": addr[0],
+            "port": addr[1],
+            "filename": filename,
+            "total_size": total_size,
+            "bytes_sent": bytes_sent,
+            "status": status
+        }
+        with self.lock:
+            self.download_history.append(event)
+            if len(self.download_history) > 1000:
+                self.download_history.pop(0)
+            if status == "Success":
+                self.download_counts[filename] = self.download_counts.get(filename, 0) + 1
+        self._notify_status_change()
+
+    def kick_client(self, ip, port):
+        """Forcefully disconnect a client connection by IP and Port."""
+        target_addr = (ip, int(port))
+        with self.lock:
+            if target_addr in self.active_clients:
+                info = self.active_clients[target_addr]
+                sock = info["socket"]
+                try:
+                    sock.shutdown(socket.SHUT_RDWR)
+                except:
+                    pass
+                try:
+                    sock.close()
+                except:
+                    pass
+                log("SERVER", f"Kicked client {target_addr}")
+                return True
+        return False
 
     def get_file_list(self):
         try:
@@ -175,7 +218,6 @@ class ServerEngine:
 
             clients = list(self.active_clients.items())
             threads = [info["thread"] for info in self.active_clients.values()]
-
             self.active_clients.clear()
             
         self._unblock_accept()
@@ -337,27 +379,39 @@ class ServerEngine:
                         
                         p.send_line(conn, p.encode_file_header(filename, size))
 
-                        with open(filepath, "rb") as f:
-                            while True:
-                                with self.lock:
-                                    if not self.is_running:
+                        bytes_sent = 0
+                        success = False
+                        try:
+                            with open(filepath, "rb") as f:
+                                while True:
+                                    with self.lock:
+                                        if not self.is_running:
+                                            break
+                                    chunk = f.read(p.CHUNK_SIZE)
+                                    if not chunk:
+                                        success = True
                                         break
-                                chunk = f.read(p.CHUNK_SIZE)
-                                if not chunk:
-                                    break
-                                try:
-                                    conn.sendall(chunk)
-                                except (
-                                    socket.timeout,
-                                    BrokenPipeError,
-                                    ConnectionResetError,
-                                    ssl.SSLError,
-                                    OSError
-                                ):
-                                    break
-                                self._add_bytes_sent(len(chunk))
+                                    try:
+                                        conn.sendall(chunk)
+                                    except (
+                                        socket.timeout,
+                                        BrokenPipeError,
+                                        ConnectionResetError,
+                                        ssl.SSLError,
+                                        OSError
+                                    ):
+                                        break
+                                    bytes_sent += len(chunk)
+                                    self._add_bytes_sent(len(chunk))
+                        except Exception as e:
+                            log("ERROR", f"Error sending file {filename} to {addr}: {e}")
+                        finally:
+                            self._record_download(addr, filename, size, bytes_sent, success)
 
-                        log("RESP", f"SEND {filename} ({size} bytes)")
+                        if success and bytes_sent == size:
+                            log("RESP", f"SEND {filename} ({size} bytes) successfully")
+                        else:
+                            log("RESP", f"SEND {filename} ({bytes_sent}/{size} bytes) failed/interrupted")
                         self._update_client_action(addr, "Idle")
                 else:
                     log("ERROR", f"Unknown command from {addr}: {request}")
