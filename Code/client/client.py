@@ -33,6 +33,18 @@ class Client:
                 result.append((entry, 0))
         return result
 
+    @staticmethod
+    def get_download_path(filename):
+        base, ext = os.path.splitext(filename)
+        safe_name = f"{base}_downloaded{ext}"
+        save_path = os.path.join(DOWNLOAD_DIR, safe_name)
+        counter = 1
+        while os.path.exists(save_path):
+            safe_name = f"{base}_downloaded_{counter}{ext}"
+            save_path = os.path.join(DOWNLOAD_DIR, safe_name)
+            counter += 1
+        return save_path
+
     def download_file(self, filename, on_progress=None, is_cancelled=None):
         filename = os.path.basename(filename)
         self.conn.send_line(f"{p.GET}|{filename}")
@@ -59,15 +71,7 @@ class Client:
             self.close()
             return False, "Invalid size"
 
-        base, ext = os.path.splitext(filename)
-        safe_name = f"{base}_downloaded{ext}"
-        save_path = os.path.join(DOWNLOAD_DIR, safe_name)
-
-        counter = 1
-        while os.path.exists(save_path):
-            safe_name = f"{base}_downloaded_{counter}{ext}"
-            save_path = os.path.join(DOWNLOAD_DIR, safe_name)
-            counter += 1
+        save_path = self.get_download_path(filename)
         with open(save_path, "wb") as f:
             received = 0
             while received < size:
@@ -83,6 +87,48 @@ class Client:
                     on_progress(received, size)
 
         return True, save_path  
+
+    def download_file_range(self, filename, start, end, save_path, on_progress=None, is_cancelled=None):
+        filename = os.path.basename(filename)
+        self.conn.send_line(f"{p.GET}|{filename}|{start}|{end}")
+
+        header = self.conn.recv_line()
+        if not header or "|" not in header:
+            self.close()
+            return False, "No header received"
+
+        parts = header.split("|")
+        if parts[0] == p.ERROR:
+            return False, parts[1] if len(parts) > 1 else "Server error"
+        if parts[0] != p.FILE or len(parts) < 3:
+            self.close()
+            return False, "Malformed header"
+
+        try:
+            range_size = int(parts[2])
+        except ValueError:
+            self.close()
+            return False, "Invalid size"
+
+        if range_size < 0:
+            self.close()
+            return False, "Invalid size"
+
+        with open(save_path, "wb") as f:
+            received = 0
+            while received < range_size:
+                if is_cancelled and is_cancelled():
+                    return False, "Cancelled"
+                chunk = self.conn.recv_bytes(min(p.CHUNK_SIZE, range_size - received))
+                if not chunk:
+                    self.close()
+                    return False, "Connection lost"
+                f.write(chunk)
+                received += len(chunk)
+                if on_progress:
+                    on_progress(received, range_size)
+
+        return True, save_path
 
     def close(self):
         try:

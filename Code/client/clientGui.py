@@ -44,38 +44,54 @@ class DownloadThread(QThread):
         self._cancelled = True
 
     def run(self):
-        c = None
+        import threading
+
+        # Try to get file size first to see if we can do multi-threaded download
+        size = None
         try:
             c = Client()
-            if self._cancelled:
-                self.finished_file.emit(self.filename, False, "Cancelled")
-                return
+            files = c.list_files()
+            c.close()
+            for name, s in files:
+                if name == self.filename:
+                    size = s
+                    break
+        except Exception:
+            pass
 
-            start_time = time.time()
-            last_bytes = [0]
-            last_time = [start_time]
-
-            def on_progress(received, total):
-                if self._cancelled:
-                    return
-                now = time.time()
-                elapsed = max(now - start_time, 0.1)
-                interval = now - last_time[0]
-
-                if interval > 0.2:
-                    speed_bytes_s = max((received - last_bytes[0]) / interval, 0)
-                    last_bytes[0] = received
-                    last_time[0] = now
-                else:
-                    speed_bytes_s = (received / elapsed) if elapsed > 0 else 0
-
-                speed_kb_s = speed_bytes_s / 1024
-                remaining = total - received
-                eta = (remaining / speed_bytes_s) if speed_bytes_s >= 1 else 0
-                percent = 0 if total == 0 else int((received / total) * 100)
-                self.progress.emit(self.filename, percent, speed_kb_s, eta)
-
+        if size is None or size < 64 * 1024:
+            # Fallback to single thread download
+            c = None
             try:
+                c = Client()
+                if self._cancelled:
+                    self.finished_file.emit(self.filename, False, "Cancelled")
+                    return
+
+                start_time = time.time()
+                last_bytes = [0]
+                last_time = [start_time]
+
+                def on_progress(received, total):
+                    if self._cancelled:
+                        return
+                    now = time.time()
+                    elapsed = max(now - start_time, 0.1)
+                    interval = now - last_time[0]
+
+                    if interval > 0.2:
+                        speed_bytes_s = max((received - last_bytes[0]) / interval, 0)
+                        last_bytes[0] = received
+                        last_time[0] = now
+                    else:
+                        speed_bytes_s = (received / elapsed) if elapsed > 0 else 0
+
+                    speed_kb_s = speed_bytes_s / 1024
+                    remaining = total - received
+                    eta = (remaining / speed_bytes_s) if speed_bytes_s >= 1 else 0
+                    percent = 0 if total == 0 else int((received / total) * 100)
+                    self.progress.emit(self.filename, percent, speed_kb_s, eta)
+
                 success, save_path = c.download_file(self.filename, on_progress=on_progress, is_cancelled=lambda: self._cancelled)
                 if self._cancelled:
                     self.finished_file.emit(self.filename, False, "Cancelled")
@@ -86,10 +102,133 @@ class DownloadThread(QThread):
                     self.finished_file.emit(self.filename, False, "Cancelled")
                 else:
                     self.finished_file.emit(self.filename, False, str(e))
+            finally:
+                if c:
+                    c.close()
+            return
 
-        finally:
-            if c:
-                c.close()
+        # Determine save path first using Client.get_download_path
+        save_path = Client.get_download_path(self.filename)
+        
+        num_threads = 4
+        chunk_size = size // num_threads
+        ranges = []
+        for i in range(num_threads):
+            start = i * chunk_size
+            end = ((i + 1) * chunk_size - 1) if i < num_threads - 1 else size - 1
+            ranges.append((start, end))
+
+        received_bytes = [0] * num_threads
+        progress_lock = threading.Lock()
+        start_time = time.time()
+        last_bytes = [0]
+        last_time = [start_time]
+
+        def make_progress_cb(thread_idx):
+            def cb(received, total_range_size):
+                if self._cancelled:
+                    return
+                with progress_lock:
+                    received_bytes[thread_idx] = received
+                
+                total_received = sum(received_bytes)
+                now = time.time()
+                elapsed = max(now - start_time, 0.1)
+                interval = now - last_time[0]
+
+                if interval > 0.2:
+                    speed_bytes_s = max((total_received - last_bytes[0]) / interval, 0)
+                    last_bytes[0] = total_received
+                    last_time[0] = now
+                else:
+                    speed_bytes_s = (total_received / elapsed) if elapsed > 0 else 0
+
+                speed_kb_s = speed_bytes_s / 1024
+                remaining = size - total_received
+                eta = (remaining / speed_bytes_s) if speed_bytes_s >= 1 else 0
+                percent = int((total_received / size) * 100)
+                self.progress.emit(self.filename, percent, speed_kb_s, eta)
+            return cb
+
+        workers = []
+        errors = [None] * num_threads
+        successes = [False] * num_threads
+
+        def worker_func(thread_idx, start, end, part_path):
+            worker_client = None
+            try:
+                worker_client = Client()
+                cb = make_progress_cb(thread_idx)
+                success, err_msg = worker_client.download_file_range(
+                    self.filename, start, end, part_path,
+                    on_progress=cb,
+                    is_cancelled=lambda: self._cancelled
+                )
+                successes[thread_idx] = success
+                if not success:
+                    errors[thread_idx] = err_msg
+            except Exception as e:
+                errors[thread_idx] = str(e)
+            finally:
+                if worker_client:
+                    try:
+                        worker_client.close()
+                    except:
+                        pass
+
+        for i in range(num_threads):
+            start, end = ranges[i]
+            part_path = f"{save_path}.part{i}"
+            t = threading.Thread(target=worker_func, args=(i, start, end, part_path), daemon=True)
+            workers.append(t)
+            t.start()
+
+        while any(t.is_alive() for t in workers):
+            if self._cancelled:
+                break
+            time.sleep(0.1)
+
+        if self._cancelled:
+            # Wait for threads to exit
+            for t in workers:
+                t.join(timeout=1.0)
+            # Cleanup parts
+            for i in range(num_threads):
+                part_path = f"{save_path}.part{i}"
+                try:
+                    os.remove(part_path)
+                except:
+                    pass
+            self.finished_file.emit(self.filename, False, "Cancelled")
+            return
+
+        if all(successes):
+            # Merge the files
+            try:
+                with open(save_path, "wb") as outfile:
+                    for i in range(num_threads):
+                        part_path = f"{save_path}.part{i}"
+                        with open(part_path, "rb") as infile:
+                            while chunk := infile.read(64 * 1024):
+                                outfile.write(chunk)
+                        try:
+                            os.remove(part_path)
+                        except:
+                            pass
+                self.finished_file.emit(self.filename, True, save_path)
+            except Exception as e:
+                self.finished_file.emit(self.filename, False, f"Merge error: {e}")
+        else:
+            # Cleanup parts
+            for i in range(num_threads):
+                part_path = f"{save_path}.part{i}"
+                try:
+                    os.remove(part_path)
+                except:
+                    pass
+            err_details = [err for err in errors if err is not None]
+            err_msg = err_details[0] if err_details else "Download failed"
+            self.finished_file.emit(self.filename, False, err_msg)
 
 
 class DownloadItemWidget(QFrame):
