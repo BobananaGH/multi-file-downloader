@@ -2,8 +2,7 @@ import os
 import socket
 import ssl
 from shared import protocol as p
-
-DOWNLOAD_DIR = os.path.join(os.path.dirname(__file__), "downloads")
+from client.config import DOWNLOAD_DIR
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 class Client:
@@ -14,6 +13,7 @@ class Client:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket = context.wrap_socket(self.socket, server_hostname="127.0.0.1")
         self.socket.connect((host, port))
+        self.socket.settimeout(10.0)
         self.conn = p.Connection(self.socket)
 
     def list_files(self) -> list[tuple[str, int]]:
@@ -73,8 +73,12 @@ class Client:
             while received < size:
                 if is_cancelled and is_cancelled():
                     return False, "Cancelled"
-                chunk = self.conn.recv_bytes(min(p.CHUNK_SIZE, size - received))
-                if not chunk:
+                try:
+                    chunk = self.conn.recv_bytes(min(p.CHUNK_SIZE, size - received))
+                except socket.timeout:
+                    self.close()
+                    return False, "Transfer timed out"
+                if chunk is None:
                     self.close()
                     return False, "Connection lost"
                 f.write(chunk)
@@ -82,7 +86,11 @@ class Client:
                 if on_progress:
                     on_progress(received, size)
 
-        return True, save_path  
+        if received != size:
+            self.close()
+            return False, "Incomplete transfer"
+
+        return True, save_path
 
     def close(self):
         try:

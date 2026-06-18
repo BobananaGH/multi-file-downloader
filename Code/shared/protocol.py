@@ -92,10 +92,8 @@ class Connection:
 
         while len(data) < size:
             chunk = self.conn.recv(min(CHUNK_SIZE, size - len(data)))
-
             if not chunk:
-                break
-
+                return None  
             data += chunk
 
         return bytes(data)

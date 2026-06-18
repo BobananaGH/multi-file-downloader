@@ -1,3 +1,5 @@
+# shared/utils.py
+
 import threading
 
 _log_handlers = []
@@ -36,4 +38,4 @@ def log(category, message):
             handler(category, message)
         except Exception as e:
             # Prevent log handler failures from affecting the main execution flow
-            print(f"[LOGGER] Error in log handler: {e}")
+            print(f"[LOGGER] Error in log handler: {e}")
