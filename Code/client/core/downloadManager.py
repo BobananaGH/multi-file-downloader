@@ -4,17 +4,10 @@ from __future__ import annotations
 
 from PySide6.QtCore import QObject, Signal
 
-from client.gui.workers import DownloadThread
+from client.core.downloadCoordinator import DownloadCoordinator
 
 
 class DownloadManager(QObject):
-    """
-    Phase 1 refactor of your original _start_download logic.
-
-    Still 1-thread-per-file (no multi-chunk yet),
-    but now safe and architecture-ready.
-    """
-
     progress_changed = Signal(str, int, float, float)
     download_finished = Signal(str, bool, str)
     download_started = Signal(str)
@@ -22,62 +15,51 @@ class DownloadManager(QObject):
     def __init__(self, parent=None):
         super().__init__(parent)
 
-        self._threads: dict[str, DownloadThread] = {}
+        self._coordinators: dict[str, DownloadCoordinator] = {}
 
     # ---------------------------------------------------------
     # PUBLIC API
     # ---------------------------------------------------------
 
-    def download(self, filename: str):
-        if filename in self._threads:
+    def download(self, filename: str, size: int):
+        if filename in self._coordinators:
+            self.download_finished.emit(filename, False, "Already downloading")
             return
-                
-        thread = DownloadThread(filename)
-        self._threads[filename] = thread
 
+        if size <= 0:
+            self.download_finished.emit(filename, False, "Unknown file size")
+            return
+
+        coordinator = DownloadCoordinator(filename, size)
+        self._coordinators[filename] = coordinator
+
+        coordinator.progress.connect(
+            lambda fn, percent, speed, eta:
+                self.progress_changed.emit(fn, percent, speed, eta)
+        )
         self.download_started.emit(filename)
 
-        thread.progress.connect(
-            self.progress_changed
+        coordinator.finished.connect(
+            lambda success, msg, fn=filename:
+                self._on_finished(fn, success, msg)
         )
 
-        thread.finished_file.connect(
-            self.download_finished
-        )
+        coordinator.start()
+    
+    
+    def _on_finished(self, filename: str, success: bool, message: str):
+        coordinator = self._coordinators.pop(filename, None)
+        if coordinator:
+            coordinator.deleteLater()
 
-        thread.finished.connect(lambda: self._cleanup(filename))
-
-        thread.start()
-        
-    def _on_progress(self, filename: str, percent: int, speed: float, eta: float):
-        self.progress_changed.emit(filename, percent, speed, eta)
-        
-    def _on_finished(self, filename: str, success: bool, save_path: str):
-        self.download_finished.emit(filename, success, save_path)
-        
-    def _cleanup(self, filename: str):
-        thread = self._threads.pop(filename, None)
-        if not thread:
-            return
-
-        try:
-            thread.progress.disconnect()
-        except (TypeError, RuntimeError):
-            pass
-
-        try:
-            thread.finished_file.disconnect()
-        except (TypeError, RuntimeError):
-            pass
-
-        thread.deleteLater()
+        self.download_finished.emit(filename, success, message)
         
     def cancel(self, filename: str):
-        thread = self._threads.get(filename)
-
-        if thread and thread.isRunning():
-            thread.cancel()
+        coordinator = self._coordinators.get(filename)
+        if coordinator:
+            coordinator.cancel()
             
     def clear_all(self):
-        for filename in list(self._threads.keys()):
-            self.cancel(filename)
+        for coordinator in list(self._coordinators.values()):
+            coordinator.cancel()
+

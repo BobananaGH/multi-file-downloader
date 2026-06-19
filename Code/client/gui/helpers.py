@@ -12,6 +12,13 @@ def format_size(size: int) -> str:
     else:
         return f"{size/1024/1024:.1f} MB"
 
+def format_speed(speed: float) -> str:
+    if speed < 1024:
+        return f"{speed:.0f} B/s"
+    elif speed < 1024 * 1024:
+        return f"{speed/1024:.1f} KB/s"
+    else:
+        return f"{speed/1024/1024:.2f} MB/s"
 
 def open_downloads_folder(base_path: str):
     os.makedirs(base_path, exist_ok=True)

@@ -92,6 +92,54 @@ class Client:
 
         return True, save_path
 
+    def download_range(self, filename, start, end, file_handle, on_progress=None, is_cancelled=None):
+        """
+        Downloads bytes [start, end] inclusive and writes them into
+        file_handle at the correct offset. Caller owns file_handle's
+        lifecycle
+        """
+        filename = os.path.basename(filename)
+        self.conn.send_line(p.encode_get(filename, start, end))
+
+        header = self.conn.recv_line()
+        if not header or "|" not in header:
+            return False, "No header received"
+
+        parts = header.split("|")
+        if parts[0] == p.ERROR:
+            return False, parts[1] if len(parts) > 1 else "Server error"
+        if parts[0] != p.FILE or len(parts) < 3:
+            return False, "Malformed header"
+        
+        try:
+            chunk_size = int(parts[2])
+        except ValueError:
+            return False, "Invalid size"
+
+        if chunk_size < 0:
+            return False, "Invalid size"
+
+        received = 0
+        while received < chunk_size:
+            if is_cancelled and is_cancelled():
+                return False, "Cancelled"
+            try:
+                chunk = self.conn.recv_bytes(min(p.CHUNK_SIZE, chunk_size - received))
+            except socket.timeout:
+                return False, "Transfer timed out"
+            if chunk is None:
+                return False, "Connection lost"
+
+            file_handle.write(chunk)
+            received += len(chunk)
+            if on_progress:
+                on_progress(received, chunk_size)
+
+        if received != chunk_size:
+            return False, "Incomplete transfer"
+
+        return True, None
+    
     def close(self):
         try:
             self.conn.close()

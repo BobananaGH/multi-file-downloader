@@ -54,6 +54,13 @@ def encode_file_header(filename, size):
     """
     return f"{FILE}|{filename}|{size}"
 
+def encode_get(filename, start=None, end=None):
+    """
+    Build a GET request. Omit start/end for a whole-file request.
+    """
+    if start is None:
+        return f"{GET}|{filename}"
+    return f"{GET}|{filename}|{start}|{end}"
 
 def send_line(conn, message: str):
     conn.sendall((message + DELIM).encode())

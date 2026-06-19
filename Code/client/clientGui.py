@@ -154,12 +154,12 @@ class FileClientGUI(QMainWindow):
         self.refresh_btn.setText("↻  Loading..." if is_loading else "↻  Refresh")
 
     def _on_download_selected(self):
-        selected = self.file_view.selected_filenames()
+        selected = self.file_view.selected_files()
         if not selected:
             QMessageBox.information(self, "No Selection", "Please select at least one file.")
             return
-        for filename in selected:
-            self.download_manager.download(filename)
+        for filename, size in selected:
+            self.download_manager.download(filename, size)
 
     def _on_clear_downloads(self):
         self.download_manager.clear_all()

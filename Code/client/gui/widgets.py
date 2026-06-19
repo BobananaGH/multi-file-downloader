@@ -11,6 +11,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 from shared.icons import get_file_icon
+from client.gui.helpers import format_speed
 
 class DownloadState:
     QUEUED = "queued"
@@ -72,7 +73,7 @@ class DownloadItemWidget(QFrame):
             self.status_label.style().unpolish(self.status_label)
             self.status_label.style().polish(self.status_label)
     
-    def set_progress(self, value: int, speed_kbps: float = 0, eta: float = 0):
+    def set_progress(self, value: int, speed: float = 0, eta: float = 0):
         self.progress_bar.setValue(value)
 
         if value >= 100:
@@ -85,7 +86,7 @@ class DownloadItemWidget(QFrame):
             self.status_label.setText(f"{value}%")
             self._update_state(DownloadState.ACTIVE)
 
-            speed_str = f"{speed_kbps:.1f} KB/s" if speed_kbps < 1024 else f"{speed_kbps/1024:.1f} MB/s"
+            speed_str = format_speed(speed)
             eta_str = f"{int(eta)}s left" if eta > 0 else ""
             self.info_label.setText(f"Downloading... {value}%  •  {speed_str}  •  {eta_str}")
 

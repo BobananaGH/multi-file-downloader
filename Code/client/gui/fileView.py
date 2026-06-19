@@ -34,7 +34,7 @@ class FileView(QWidget):
     search_changed(query)          User typed in the search bar.
     """
 
-    download_requested = Signal(str)
+    download_requested = Signal(str, int)
     search_changed     = Signal(str)
     open_downloads_requested = Signal()
 
@@ -129,9 +129,12 @@ class FileView(QWidget):
         self.list_widget.addTopLevelItem(item)
         self.count_label.setText("—")
 
-    def selected_filenames(self) -> list[str]:
+    def selected_files(self) -> list[tuple[str, int]]:
         return [
-            item.data(0, Qt.UserRole)
+            (
+                item.data(0, Qt.UserRole),
+                item.data(1, Qt.UserRole)
+            )
             for item in self.list_widget.selectedItems()
             if item.data(0, Qt.UserRole)
         ]
@@ -142,20 +145,26 @@ class FileView(QWidget):
 
     def _on_double_clicked(self, item: QTreeWidgetItem, _col: int) -> None:
         filename = item.data(0, Qt.UserRole)
-        if filename:
-            self.download_requested.emit(filename)
+        size = item.data(1, Qt.UserRole)
+
+        if filename and size is not None:
+            self.download_requested.emit(filename, size)
 
     def _show_context_menu(self, pos) -> None:
         item = self.list_widget.itemAt(pos)
         if not item:
             return
+
         filename = item.data(0, Qt.UserRole)
+        size = item.data(1, Qt.UserRole)
+
         if not filename:
             return
+
         show_file_context_menu(
             self.list_widget,
             pos,
             filename,
-            lambda fn: self.download_requested.emit(fn),
+            lambda fn: self.download_requested.emit(fn, size),
             lambda: self.open_downloads_requested.emit(),
         )
