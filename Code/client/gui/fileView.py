@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QTreeWidget,
     QTreeWidgetItem,
     QHeaderView,
+    QSizePolicy,
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -81,8 +82,10 @@ class FileView(QWidget):
         self.list_widget.setObjectName("fileList")
         self.list_widget.setSelectionMode(QTreeWidget.ExtendedSelection)
         self.list_widget.setMinimumHeight(220)
+        self.list_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding) 
         self.list_widget.setHeaderLabels(["Filename", "Size"])
         self.list_widget.setSortingEnabled(True)
+        self.list_widget.header().sortIndicatorChanged.connect(self._on_sort_changed)
         self.list_widget.setRootIsDecorated(False)
         self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
         self.list_widget.customContextMenuRequested.connect(self._show_context_menu)
@@ -120,6 +123,7 @@ class FileView(QWidget):
 
         n = len(files)
         self.count_label.setText(f"{n} file{'s' if n != 1 else ''}")
+        self.list_widget.sortItems(getattr(self, '_sort_column', 0), getattr(self, '_sort_order', Qt.AscendingOrder))
 
     def show_error(self, message: str) -> None:
         """Replace the file list with a single non-selectable error row."""
@@ -168,3 +172,7 @@ class FileView(QWidget):
             lambda fn: self.download_requested.emit(fn, size),
             lambda: self.open_downloads_requested.emit(),
         )
+
+    def _on_sort_changed(self, column: int, order) -> None:
+        self._sort_column = column
+        self._sort_order = order
