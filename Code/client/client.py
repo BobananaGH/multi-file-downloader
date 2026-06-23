@@ -33,18 +33,6 @@ class Client:
                 result.append((entry, 0))
         return result
 
-    @staticmethod
-    def get_download_path(filename):
-        base, ext = os.path.splitext(filename)
-        safe_name = f"{base}_downloaded{ext}"
-        save_path = os.path.join(DOWNLOAD_DIR, safe_name)
-        counter = 1
-        while os.path.exists(save_path):
-            safe_name = f"{base}_downloaded_{counter}{ext}"
-            save_path = os.path.join(DOWNLOAD_DIR, safe_name)
-            counter += 1
-        return save_path
-
     def download_file(self, filename, on_progress=None, is_cancelled=None):
         filename = os.path.basename(filename)
         self.conn.send_line(f"{p.GET}|{filename}")
@@ -71,7 +59,15 @@ class Client:
             self.close()
             return False, "Invalid size"
 
-        save_path = self.get_download_path(filename)
+        base, ext = os.path.splitext(filename)
+        safe_name = f"{base}_downloaded{ext}"
+        save_path = os.path.join(DOWNLOAD_DIR, safe_name)
+
+        counter = 1
+        while os.path.exists(save_path):
+            safe_name = f"{base}_downloaded_{counter}{ext}"
+            save_path = os.path.join(DOWNLOAD_DIR, safe_name)
+            counter += 1
         with open(save_path, "wb") as f:
             received = 0
             while received < size:

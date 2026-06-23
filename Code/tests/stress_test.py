@@ -15,7 +15,7 @@ from client.client import Client
 HOST = "127.0.0.1"
 PORT = 5000
 NUM_CLIENTS = 25
-FILE_TO_GET = "duck.jpg"  # must exist in server/file_storage/
+FILE_TO_GET = "mountainous-landscape-with-fog.jpg"  # must exist in server/file_storage/
 
 # =========================
 # Shared state
