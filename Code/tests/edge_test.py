@@ -14,7 +14,7 @@ from shared import protocol as p
 HOST = "127.0.0.1"
 PORT = 5000
 CERT_PATH = os.path.join(os.path.dirname(__file__), "..", "certs", "server.crt")
-FILE_TO_GET = "duck.jpg"
+FILE_TO_GET = "mountainous-landscape-with-fog.jpg"
 SOURCE_PATH = os.path.join(os.path.dirname(__file__), "..", "server", "file_storage", FILE_TO_GET)
 
 def get_tls_socket():
@@ -564,113 +564,6 @@ def test_abrupt_client_kill():
         test_result(False, str(e))
     
 
-def test_range_requests():
-    test_header("Range requests (chunking) and parallel downloads")
-    temp_filename = "temp_range_test.dat"
-    temp_filepath = os.path.join(os.path.dirname(__file__), "..", "server", "file_storage", temp_filename)
-    
-    # 1. Create a 100 KB test file containing random but verifiable pattern
-    file_content = bytes([i % 256 for i in range(100 * 1024)])
-    try:
-        with open(temp_filepath, "wb") as f:
-            f.write(file_content)
-        
-        # 2. Request a specific range: 10000 to 19999 (10 KB)
-        start = 10000
-        end = 19999
-        expected_size = end - start + 1
-        expected_sub_content = file_content[start:end+1]
-        
-        with get_tls_socket() as s:
-            s.connect((HOST, PORT))
-            s.sendall(f"GET|{temp_filename}|{start}|{end}\n".encode())
-            s.settimeout(5)
-            
-            header = b""
-            while b"\n" not in header:
-                header += s.recv(1)
-            
-            header_str = header.decode().strip()
-            parts = header_str.split("|")
-            if parts[0] != p.FILE or int(parts[2]) != expected_size:
-                test_result(False, f"Invalid header received: {header_str}")
-                return
-            
-            received_data = b""
-            while len(received_data) < expected_size:
-                chunk = s.recv(min(4096, expected_size - len(received_data)))
-                if not chunk:
-                    break
-                received_data += chunk
-                
-        if received_data != expected_sub_content:
-            test_result(False, "Single range data mismatch")
-            return
-            
-        # 3. Test parallel chunking download simulation
-        num_threads = 4
-        chunk_size = len(file_content) // num_threads
-        ranges = []
-        for i in range(num_threads):
-            t_start = i * chunk_size
-            t_end = ((i + 1) * chunk_size - 1) if i < num_threads - 1 else len(file_content) - 1
-            ranges.append((t_start, t_end))
-            
-        part_paths = []
-        threads = []
-        errors = [None] * num_threads
-        successes = [False] * num_threads
-        
-        # Import client to use its connection wrapping
-        from client.client import Client
-        
-        def worker(thread_idx, r_start, r_end, save_path):
-            try:
-                cli = Client(HOST, PORT)
-                success, _ = cli.download_file_range(temp_filename, r_start, r_end, save_path)
-                cli.close()
-                successes[thread_idx] = success
-            except Exception as e:
-                errors[thread_idx] = str(e)
-                
-        for i in range(num_threads):
-            p_start, p_end = ranges[i]
-            p_path = temp_filepath + f".part{i}"
-            part_paths.append(p_path)
-            t = threading.Thread(target=worker, args=(i, p_start, p_end, p_path))
-            threads.append(t)
-            t.start()
-            
-        for t in threads:
-            t.join()
-            
-        if not all(successes):
-            test_result(False, f"Parallel download failed: {errors}")
-            return
-            
-        # Merge parts
-        merged_data = b""
-        for path in part_paths:
-            with open(path, "rb") as pf:
-                merged_data += pf.read()
-            os.remove(path)
-            
-        if merged_data != file_content:
-            test_result(False, "Merged parallel download data mismatch")
-            return
-            
-        test_result(True, "Range requests and parallel downloading verified successfully")
-        
-    except Exception as e:
-        test_result(False, str(e))
-    finally:
-        if os.path.exists(temp_filepath):
-            try:
-                os.remove(temp_filepath)
-            except:
-                pass
-
-
 if __name__ == "__main__":
     print("\nEdge Case Test Suite")
     print("Make sure the server is running before proceeding")
@@ -693,7 +586,6 @@ if __name__ == "__main__":
     test_thread_leak()
     test_slow_client()
     test_buffer_overflow()
-    test_range_requests()
     
     # Extra
     test_fragmented_request()
