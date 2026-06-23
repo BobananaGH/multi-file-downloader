@@ -2,8 +2,7 @@ import os
 import socket
 import ssl
 from shared import protocol as p
-
-DOWNLOAD_DIR = os.path.join(os.path.dirname(__file__), "downloads")
+from client.config import DOWNLOAD_DIR
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 class Client:
@@ -14,6 +13,7 @@ class Client:
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
         self.socket = context.wrap_socket(self.socket, server_hostname="127.0.0.1")
         self.socket.connect((host, port))
+        self.socket.settimeout(10.0)
         self.conn = p.Connection(self.socket)
 
     def list_files(self) -> list[tuple[str, int]]:
@@ -77,8 +77,12 @@ class Client:
             while received < size:
                 if is_cancelled and is_cancelled():
                     return False, "Cancelled"
-                chunk = self.conn.recv_bytes(min(p.CHUNK_SIZE, size - received))
-                if not chunk:
+                try:
+                    chunk = self.conn.recv_bytes(min(p.CHUNK_SIZE, size - received))
+                except socket.timeout:
+                    self.close()
+                    return False, "Transfer timed out"
+                if chunk is None:
                     self.close()
                     return False, "Connection lost"
                 f.write(chunk)
@@ -86,50 +90,60 @@ class Client:
                 if on_progress:
                     on_progress(received, size)
 
-        return True, save_path  
+        if received != size:
+            self.close()
+            return False, "Incomplete transfer"
 
-    def download_file_range(self, filename, start, end, save_path, on_progress=None, is_cancelled=None):
+        return True, save_path
+
+    def download_range(self, filename, start, end, file_handle, on_progress=None, is_cancelled=None):
+        """
+        Downloads bytes [start, end] inclusive and writes them into
+        file_handle at the correct offset. Caller owns file_handle's
+        lifecycle
+        """
         filename = os.path.basename(filename)
-        self.conn.send_line(f"{p.GET}|{filename}|{start}|{end}")
+        self.conn.send_line(p.encode_get(filename, start, end))
 
         header = self.conn.recv_line()
         if not header or "|" not in header:
-            self.close()
             return False, "No header received"
 
         parts = header.split("|")
         if parts[0] == p.ERROR:
             return False, parts[1] if len(parts) > 1 else "Server error"
         if parts[0] != p.FILE or len(parts) < 3:
-            self.close()
             return False, "Malformed header"
-
+        
         try:
-            range_size = int(parts[2])
+            chunk_size = int(parts[2])
         except ValueError:
-            self.close()
             return False, "Invalid size"
 
-        if range_size < 0:
-            self.close()
+        if chunk_size < 0:
             return False, "Invalid size"
 
-        with open(save_path, "wb") as f:
-            received = 0
-            while received < range_size:
-                if is_cancelled and is_cancelled():
-                    return False, "Cancelled"
-                chunk = self.conn.recv_bytes(min(p.CHUNK_SIZE, range_size - received))
-                if not chunk:
-                    self.close()
-                    return False, "Connection lost"
-                f.write(chunk)
-                received += len(chunk)
-                if on_progress:
-                    on_progress(received, range_size)
+        received = 0
+        while received < chunk_size:
+            if is_cancelled and is_cancelled():
+                return False, "Cancelled"
+            try:
+                chunk = self.conn.recv_bytes(min(p.CHUNK_SIZE, chunk_size - received))
+            except socket.timeout:
+                return False, "Transfer timed out"
+            if chunk is None:
+                return False, "Connection lost"
 
-        return True, save_path
+            file_handle.write(chunk)
+            received += len(chunk)
+            if on_progress:
+                on_progress(received, chunk_size)
 
+        if received != chunk_size:
+            return False, "Incomplete transfer"
+
+        return True, None
+    
     def close(self):
         try:
             self.conn.close()

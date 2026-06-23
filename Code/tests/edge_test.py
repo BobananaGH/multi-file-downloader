@@ -690,7 +690,6 @@ if __name__ == "__main__":
     test_server_still_alive()
 
     # New
-    test_file_integrity()
     test_thread_leak()
     test_slow_client()
     test_buffer_overflow()

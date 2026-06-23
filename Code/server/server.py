@@ -362,85 +362,84 @@ class ServerEngine:
                         continue
 
                     filename = os.path.basename(parts[1])
-                    
+
                     if not filename:
                         p.send_line(conn, p.encode_error("Invalid filename"))
                         log("ERROR", f"Empty filename from {addr}")
                         continue
-                    
+
                     filepath = os.path.join(self.storage_dir, filename)
 
                     if not os.path.exists(filepath):
                         p.send_line(conn, p.encode_error("File not found"))
                         log("ERROR", f"File not found: {filename}")
-                    else:
-                        total_size = os.path.getsize(filepath)
-                        
-                        start_offset = 0
-                        end_offset = None
-                        is_range = False
-                        if len(parts) >= 4:
-                            try:
-                                start_offset = int(parts[2])
-                                end_offset = int(parts[3])
-                                is_range = True
-                            except ValueError:
-                                pass
-                        
-                        if is_range and total_size > 0:
-                            start_offset = max(0, min(start_offset, total_size - 1))
-                            if end_offset is None or end_offset >= total_size:
-                                end_offset = total_size - 1
-                            transmit_size = max(0, end_offset - start_offset + 1)
-                        else:
-                            transmit_size = total_size
-                            start_offset = 0
+                        continue
 
-                        if is_range:
-                            self._update_client_action(addr, f"Downloading {filename} ({start_offset}-{end_offset})")
-                        else:
-                            self._update_client_action(addr, f"Downloading {filename}")
-                        
-                        p.send_line(conn, p.encode_file_header(filename, transmit_size))
-
-                        bytes_sent = 0
-                        success = False
+                    full_size = os.path.getsize(filepath)
+                
+                    # parse optional byte range
+                    
+                    if len(parts) not in (2, 4):
+                        p.send_line(conn, p.encode_error("Invalid GET request"))
+                        continue
+                    
+                    if len(parts) == 4:
                         try:
-                            with open(filepath, "rb") as f:
-                                if start_offset > 0:
-                                    f.seek(start_offset)
-                                while bytes_sent < transmit_size:
-                                    with self.lock:
-                                        if not self.is_running:
-                                            break
-                                    to_read = min(p.CHUNK_SIZE, transmit_size - bytes_sent)
-                                    chunk = f.read(to_read)
-                                    if not chunk:
-                                        break
-                                    try:
-                                        conn.sendall(chunk)
-                                    except (
-                                        socket.timeout,
-                                        BrokenPipeError,
-                                        ConnectionResetError,
-                                        ssl.SSLError,
-                                        OSError
-                                    ):
-                                        break
-                                    bytes_sent += len(chunk)
-                                    self._add_bytes_sent(len(chunk))
-                            if bytes_sent == transmit_size:
-                                success = True
-                        except Exception as e:
-                            log("ERROR", f"Error sending file {filename} to {addr}: {e}")
-                        finally:
-                            self._record_download(addr, filename, transmit_size, bytes_sent, success)
+                            start = int(parts[2])
+                            end = int(parts[3])
+                        except ValueError:
+                            p.send_line(conn, p.encode_error("Invalid range"))
+                            continue
+                        if start < 0 or end >= full_size or start > end:
+                            p.send_line(conn, p.encode_error("Invalid range"))
+                            continue
+                        chunk_size = end - start + 1
+                    else:
+                        start = 0
+                        chunk_size = full_size
 
-                        if success and bytes_sent == transmit_size:
-                            log("RESP", f"SEND {filename} ({transmit_size} bytes) successfully")
-                        else:
-                            log("RESP", f"SEND {filename} ({bytes_sent}/{transmit_size} bytes) failed/interrupted")
+                    self._update_client_action(addr, f"Downloading {filename}")
+                    p.send_line(conn, p.encode_file_header(filename, chunk_size))
+
+                    bytes_sent = 0
+                    success = False
+                    try:
+                        with open(filepath, "rb") as f:
+                            f.seek(start)
+                            remaining = chunk_size
+                            while remaining > 0:
+                                with self.lock:
+                                    if not self.is_running:
+                                        break
+                                to_read = min(p.CHUNK_SIZE, remaining)
+                                chunk = f.read(to_read)
+                                if not chunk:
+                                    break
+                                try:
+                                    conn.sendall(chunk)
+                                except (
+                                    socket.timeout,
+                                    BrokenPipeError,
+                                    ConnectionResetError,
+                                    ssl.SSLError,
+                                    OSError
+                                ):
+                                    break
+                                bytes_sent += len(chunk)
+                                remaining -= len(chunk)
+                                self._add_bytes_sent(len(chunk))
+                            else:
+                                success = True
+                    except Exception as e:
+                        log("ERROR", f"Error sending file {filename} to {addr}: {e}")
+                    finally:
+                        self._record_download(addr, filename, chunk_size, bytes_sent, success)
                         self._update_client_action(addr, "Idle")
+
+                    if success and bytes_sent == chunk_size:
+                        log("RESP", f"SEND {filename} [{start}:{start+chunk_size-1}] ({chunk_size} bytes) successfully")
+                    else:
+                        log("RESP", f"SEND {filename} [{start}:{start+chunk_size-1}] ({bytes_sent}/{chunk_size} bytes) failed/interrupted")
                 else:
                     log("ERROR", f"Unknown command from {addr}: {request}")
                     p.send_line(conn, p.encode_error("Unknown command"))
