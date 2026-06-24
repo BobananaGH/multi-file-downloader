@@ -132,20 +132,7 @@ class FileView(QWidget):
         item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
         self.list_widget.addTopLevelItem(item)
         self.count_label.setText("—")
-    def set_file_downloading(self, filename: str, is_downloading: bool) -> None:
-        """Làm mờ file đang tải, không cho chọn."""
-        for i in range(self.list_widget.topLevelItemCount()):
-            item = self.list_widget.topLevelItem(i)
-            if item.data(0, Qt.UserRole) == filename:
-                if is_downloading:
-                    item.setFlags(item.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsEnabled)
-                    item.setText(0, f"⏳  {filename}  (Downloading...)")
-                else:
-                    item.setFlags(item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-                    icon = get_file_icon(filename)
-                    item.setText(0, f"{icon}  {filename}")
-                break
-
+        
     def set_file_downloading(self, filename: str, is_downloading: bool) -> None:
         """Làm mờ file đang tải, không cho chọn."""
         for i in range(self.list_widget.topLevelItemCount()):
