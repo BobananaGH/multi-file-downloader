@@ -124,6 +124,14 @@ class FileClientGUI(QMainWindow):
         self.download_manager.progress_changed.connect(self.download_view.update_progress)
         self.download_manager.download_finished.connect(self.download_view.mark_finished)
 
+        # Làm mờ file đang tải trong danh sách
+        self.download_manager.download_started.connect(
+            lambda fn: self.file_view.set_file_downloading(fn, True)
+        )
+        self.download_manager.download_finished.connect(
+            lambda fn, success, msg: self.file_view.set_file_downloading(fn, False)
+        )
+
         # DownloadView → DownloadManager
         self.download_view.cancel_requested.connect(self.download_manager.cancel)
         self.download_view.clear_requested.connect(self._on_clear_downloads)
@@ -137,7 +145,7 @@ class FileClientGUI(QMainWindow):
     def _load_styles(self):
         try:
             qss_path = os.path.join(os.path.dirname(__file__), "clientGui.qss")
-            with open(qss_path, "r") as f:
+            with open(qss_path, "r", encoding="utf-8") as f:
                 self.setStyleSheet(f.read())
         except Exception as e:
             print("QSS load failed:", e)
