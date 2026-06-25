@@ -36,7 +36,6 @@ class DownloadView(QWidget):
         super().__init__(parent)
 
         self._widgets: dict[str, DownloadItemWidget] = {}
-
         self._build_ui()
 
     # ---------------------------------------------------------
@@ -47,7 +46,7 @@ class DownloadView(QWidget):
         root = QVBoxLayout(self)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(10)
-        
+
         header = QHBoxLayout()
 
         title = QLabel("DOWNLOADS")
@@ -65,21 +64,25 @@ class DownloadView(QWidget):
         self.scroll = QScrollArea()
         self.scroll.setObjectName("downloadScroll")
         self.scroll.setWidgetResizable(True)
-
+        self.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.scroll.setMinimumHeight(150)
-        
+        self.scroll.setFrameShape(QScrollArea.NoFrame)
+
         self.container = QWidget()
-        
+        self.container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
+
         self.download_layout = QVBoxLayout(self.container)
         self.download_layout.setContentsMargins(0, 0, 0, 0)
         self.download_layout.setAlignment(Qt.AlignTop)
         self.download_layout.setSpacing(6)
+
+        self.container.setMinimumHeight(0)
+        self.container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         
-        self.scroll.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
-        self.container.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding)
         self.scroll.setWidget(self.container)
-        
+
         root.addWidget(self.scroll)
+
         self.clear_btn.clicked.connect(self.clear_requested.emit)
         
     def add_download(self, filename: str):
@@ -87,10 +90,9 @@ class DownloadView(QWidget):
             return
 
         widget = DownloadItemWidget(filename)
+        widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
 
-        widget.cancel_requested.connect(
-            self.cancel_requested.emit
-        )
+        widget.cancel_requested.connect(self.cancel_requested.emit)
 
         self.download_layout.addWidget(widget)
 

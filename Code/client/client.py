@@ -1,3 +1,5 @@
+# Code/client/client.py
+
 import os
 import socket
 import ssl
@@ -6,14 +8,24 @@ from client.config import DOWNLOAD_DIR
 os.makedirs(DOWNLOAD_DIR, exist_ok=True)
 
 class Client:
-    def __init__(self, host="127.0.0.1", port=5000):
+    def __init__(self, host="127.0.0.1", port=5000, timeout=10.0):
         context = ssl.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
-        context.load_verify_locations(os.path.join(os.path.dirname(__file__), "..", "certs", "server.crt"))
-        
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        self.socket = context.wrap_socket(self.socket, server_hostname="127.0.0.1")
-        self.socket.connect((host, port))
-        self.socket.settimeout(10.0)
+        context.load_verify_locations(
+            os.path.join(os.path.dirname(__file__), "..", "certs", "server.crt")
+        )
+
+        raw = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        raw.settimeout(timeout)
+
+        raw.connect((host, port))
+
+        self.socket = context.wrap_socket(
+            raw,
+            server_hostname=host
+        )
+
+        self.socket.settimeout(timeout)
+
         self.conn = p.Connection(self.socket)
 
     def list_files(self) -> list[tuple[str, int]]:

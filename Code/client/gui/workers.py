@@ -63,15 +63,13 @@ class ChunkDownloadThread(QThread):
                 if self.isInterruptionRequested():
                     return
                 now = time.time()
-                interval = max(now - last_time[0], 0.001)
-                if interval > 0.2:
-                    speed_bytes_s = max((received - last_bytes[0]) / interval, 0)
-                    last_bytes[0] = received
-                    last_time[0] = now
-                else:
-                    elapsed = max(now - start_time, 0.1)
-                    speed_bytes_s = received / elapsed
-                self.progress.emit(received, speed_bytes_s)
+                interval = now - last_time[0]
+                if interval < 0.2:
+                    return
+                speed_bytes_s = (received - last_bytes[0]) / max(interval, 0.001)
+                last_bytes[0] = received
+                last_time[0] = now
+                self.progress.emit(received, max(speed_bytes_s, 0))
 
             success, msg = c.download_range(
                 self.filename,
@@ -82,15 +80,16 @@ class ChunkDownloadThread(QThread):
                 is_cancelled=lambda: self.isInterruptionRequested()
             )
 
-            if self.isInterruptionRequested():
-                self.finished_chunk.emit(False, "Cancelled")
+            if success:
+                self.finished_chunk.emit(True, "")
             else:
-                self.finished_chunk.emit(success, msg or "")
+                self.finished_chunk.emit(False, msg or "Download failed")
 
         except Exception as e:
             if self.isInterruptionRequested():
                 self.finished_chunk.emit(False, "Cancelled")
             else:
+                print(f"[CHUNK {self.range_start}-{self.range_end}] ERROR: {e}")
                 self.finished_chunk.emit(False, str(e))
             
         finally:

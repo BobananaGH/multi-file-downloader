@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import os
-
 from PySide6.QtWidgets import (
     QWidget,
     QVBoxLayout,
@@ -21,6 +19,15 @@ from shared.icons import get_file_icon
 from client.gui.helpers import format_size
 from client.gui.menu import show_file_context_menu
 from client.gui.widgets import SortableTreeItem
+from client.core.fileStatus import FileStatus
+
+NAME_ROLE = Qt.UserRole
+SIZE_ROLE = Qt.UserRole + 1
+STATUS_ROLE = Qt.UserRole + 2
+
+COL_NAME = 0
+COL_STATUS = 1
+COL_SIZE = 2
 
 class FileView(QWidget):
     """
@@ -41,6 +48,9 @@ class FileView(QWidget):
 
     def __init__(self, parent: QWidget | None = None) -> None:
         super().__init__(parent)
+        self._items: dict[str, SortableTreeItem] = {}
+        self._sort_column = 0
+        self._sort_order = Qt.AscendingOrder
         self._build_ui()
 
     # ------------------------------------------------------------------
@@ -81,9 +91,9 @@ class FileView(QWidget):
         self.list_widget = QTreeWidget()
         self.list_widget.setObjectName("fileList")
         self.list_widget.setSelectionMode(QTreeWidget.ExtendedSelection)
-        self.list_widget.setMinimumHeight(220)
-        self.list_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Expanding) 
-        self.list_widget.setHeaderLabels(["Filename", "Size"])
+        self.list_widget.setFixedHeight(220)
+        self.list_widget.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+        self.list_widget.setHeaderLabels(["Filename", "Status", "Size"])
         self.list_widget.setSortingEnabled(True)
         self.list_widget.header().sortIndicatorChanged.connect(self._on_sort_changed)
         self.list_widget.setRootIsDecorated(False)
@@ -95,7 +105,10 @@ class FileView(QWidget):
         hdr.setStretchLastSection(False)
         hdr.setSectionResizeMode(0, QHeaderView.Stretch)
         hdr.setSectionResizeMode(1, QHeaderView.Fixed)
-        hdr.resizeSection(1, 75)
+        hdr.resizeSection(1, 130)
+
+        hdr.setSectionResizeMode(2, QHeaderView.Fixed)
+        hdr.resizeSection(2, 75)
 
         layout.addWidget(self.list_widget)
 
@@ -106,20 +119,26 @@ class FileView(QWidget):
     def set_files(self, files: list[tuple[str, int]]) -> None:
         """Render *files* into the tree. Replaces whatever was there."""
         self.list_widget.clear()
+        self._items.clear()
 
         if not files:
-            placeholder = QTreeWidgetItem(["No files available on server", ""])
+            placeholder = QTreeWidgetItem(["No files available on server", "", ""])
             placeholder.setFlags(placeholder.flags() & ~Qt.ItemIsSelectable)
             self.list_widget.addTopLevelItem(placeholder)
             self.count_label.setText("0 files")
             return
 
         for name, size in files:
-            icon = get_file_icon(name)
-            item = SortableTreeItem([f"{icon}  {name}", format_size(size)])
-            item.setData(0, Qt.UserRole, name)
-            item.setData(1, Qt.UserRole, size)
+            item = SortableTreeItem(["", "", format_size(size)])
+
+            item.setData(0, NAME_ROLE, name)
+            item.setData(2, SIZE_ROLE, size)
+            item.setData(0, STATUS_ROLE, FileStatus.AVAILABLE)
+
+            self._render_item(item)
+
             self.list_widget.addTopLevelItem(item)
+            self._items[name] = item
 
         n = len(files)
         self.count_label.setText(f"{n} file{'s' if n != 1 else ''}")
@@ -128,33 +147,57 @@ class FileView(QWidget):
     def show_error(self, message: str) -> None:
         """Replace the file list with a single non-selectable error row."""
         self.list_widget.clear()
-        item = QTreeWidgetItem([f"⚠  {message}", ""])
+        self._items.clear()
+        item = QTreeWidgetItem([f"⚠ {message}", "", ""])
         item.setFlags(item.flags() & ~Qt.ItemIsSelectable)
         self.list_widget.addTopLevelItem(item)
         self.count_label.setText("—")
         
-    def set_file_downloading(self, filename: str, is_downloading: bool) -> None:
-        """Làm mờ file đang tải, không cho chọn."""
-        for i in range(self.list_widget.topLevelItemCount()):
-            item = self.list_widget.topLevelItem(i)
-            if item.data(0, Qt.UserRole) == filename:
-                if is_downloading:
-                    item.setFlags(item.flags() & ~Qt.ItemIsSelectable & ~Qt.ItemIsEnabled)
-                    item.setText(0, f"⏳  {filename}  (Downloading...)")
-                else:
-                    item.setFlags(item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
-                    icon = get_file_icon(filename)
-                    item.setText(0, f"{icon}  {filename}")
-                break
+    def set_file_status(self, filename: str, status: FileStatus) -> None:
+        item = self._items.get(filename)
+        if item is None:
+            return
 
+        item.setData(0, STATUS_ROLE, status)
+
+        if status == FileStatus.DOWNLOADING:
+            item.setFlags(item.flags() & ~(Qt.ItemIsSelectable | Qt.ItemIsEnabled))
+        else:
+            item.setFlags(item.flags() | Qt.ItemIsSelectable | Qt.ItemIsEnabled)
+
+        self._render_item(item)
+            
+    def _render_item(self, item: QTreeWidgetItem) -> None:
+        name = item.data(0, NAME_ROLE) or ""
+        status = item.data(0, STATUS_ROLE)
+
+        item.setText(0, f"{get_file_icon(name)}  {name}")
+
+        if status == FileStatus.AVAILABLE:
+            item.setText(1, "🟢 Available")
+
+        elif status == FileStatus.DOWNLOADING:
+            item.setText(1, "⏳ Downloading")
+
+        elif status == FileStatus.DOWNLOADED:
+            item.setText(1, "✅ Downloaded")
+
+        elif status == FileStatus.FAILED:
+            item.setText(1, "❌ Failed")
+
+        elif status == FileStatus.CANCELLED:
+            item.setText(1, "⛔ Cancelled")
+        else:
+            item.setText(1, str(status))
+        
     def selected_files(self) -> list[tuple[str, int]]:
         return [
             (
-                item.data(0, Qt.UserRole),
-                item.data(1, Qt.UserRole)
+                item.data(0, NAME_ROLE),
+                item.data(2, SIZE_ROLE)
             )
             for item in self.list_widget.selectedItems()
-            if item.data(0, Qt.UserRole)
+            if item.data(0, NAME_ROLE)
         ]
 
     # ------------------------------------------------------------------
@@ -162,8 +205,8 @@ class FileView(QWidget):
     # ------------------------------------------------------------------
 
     def _on_double_clicked(self, item: QTreeWidgetItem, _col: int) -> None:
-        filename = item.data(0, Qt.UserRole)
-        size = item.data(1, Qt.UserRole)
+        filename = item.data(0, NAME_ROLE)
+        size = item.data(2, SIZE_ROLE)
 
         if filename and size is not None:
             self.download_requested.emit(filename, size)
@@ -173,8 +216,8 @@ class FileView(QWidget):
         if not item:
             return
 
-        filename = item.data(0, Qt.UserRole)
-        size = item.data(1, Qt.UserRole)
+        filename = item.data(0, NAME_ROLE)
+        size = item.data(2, SIZE_ROLE)
 
         if not filename:
             return

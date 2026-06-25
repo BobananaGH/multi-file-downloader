@@ -46,12 +46,19 @@ class DownloadManager(QObject):
 
         coordinator.start()
     
-    
+    def wait_all(self, timeout_ms: int = 3000):
+        for coordinator in list(self._coordinators.values()):
+            coordinator.wait_chunks(timeout_ms)
+        
     def _on_finished(self, filename: str, success: bool, message: str):
         coordinator = self._coordinators.pop(filename, None)
         if coordinator:
+            try:
+                coordinator.progress.disconnect()
+                coordinator.finished.disconnect()
+            except (TypeError, RuntimeError):
+                pass
             coordinator.deleteLater()
-
         self.download_finished.emit(filename, success, message)
         
     def cancel(self, filename: str):

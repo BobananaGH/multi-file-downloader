@@ -69,11 +69,23 @@ class DownloadCoordinator(QObject):
     def cancel(self):
         self._cancelled = True
         for chunk in self._chunks:
-            chunk.cancel()
+            try:
+                if chunk.isRunning():
+                    chunk.cancel()
+            except RuntimeError:
+                pass  
         if not self._chunks:
             self._finalize()
 
     # ---------------------------------------------------------
+    def wait_chunks(self, timeout_ms=3000):
+        for chunk in self._chunks:
+            try:
+                if chunk.isRunning():
+                    chunk.wait(timeout_ms)  
+            except RuntimeError:
+                pass
+            
     def _on_chunk_progress(self, idx, received, speed):
         self._chunk_received[idx] = received
         self._chunk_speed[idx] = speed
@@ -83,9 +95,9 @@ class DownloadCoordinator(QObject):
         self._chunk_done[idx] = True
 
         if not success and not self._failed:
+            print(f"[COORD] Chunk {idx} failed: {message}")  
             self._failed = True
             self._fail_message = message
-            # cancel sibling chunks since whole download fails
             for j, chunk in enumerate(self._chunks):
                 if j != idx and not self._chunk_done[j]:
                     chunk.cancel()

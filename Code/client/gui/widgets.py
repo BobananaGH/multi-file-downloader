@@ -113,7 +113,6 @@ class DownloadItemWidget(QFrame):
 class SortableTreeItem(QTreeWidgetItem):
     def __lt__(self, other):
         col = self.treeWidget().sortColumn()
-        if col == 1:
-            return int(self.data(1, Qt.UserRole) or 0) < int(other.data(1, Qt.UserRole) or 0)
+        if col == 2:
+            return int(self.data(2, Qt.UserRole + 1) or 0) < int(other.data(2, Qt.UserRole + 1) or 0)
         return self.text(col).lower() < other.text(col).lower()
-

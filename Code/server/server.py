@@ -1,3 +1,5 @@
+# Code/server/server.py
+
 import socket
 import os
 import threading
@@ -402,7 +404,7 @@ class ServerEngine:
                     p.send_line(conn, p.encode_file_header(filename, chunk_size))
 
                     bytes_sent = 0
-                    success = False
+                    interrupted_by_client = False
                     try:
                         with open(filepath, "rb") as f:
                             f.seek(start)
@@ -424,22 +426,23 @@ class ServerEngine:
                                     ssl.SSLError,
                                     OSError
                                 ):
+                                    interrupted_by_client = True
                                     break
                                 bytes_sent += len(chunk)
                                 remaining -= len(chunk)
-                                self._add_bytes_sent(len(chunk))
-                            else:
-                                success = True
+
+                            success = (bytes_sent == chunk_size) or interrupted_by_client
+
                     except Exception as e:
                         log("ERROR", f"Error sending file {filename} to {addr}: {e}")
                     finally:
                         self._record_download(addr, filename, chunk_size, bytes_sent, success)
                         self._update_client_action(addr, "Idle")
 
-                    if success and bytes_sent == chunk_size:
-                        log("RESP", f"SEND {filename} [{start}:{start+chunk_size-1}] ({chunk_size} bytes) successfully")
+                    if success:
+                        log("RESP", f"SEND {filename} [{start}:{start+chunk_size-1}] ({bytes_sent}/{chunk_size} bytes) OK")
                     else:
-                        log("RESP", f"SEND {filename} [{start}:{start+chunk_size-1}] ({bytes_sent}/{chunk_size} bytes) failed/interrupted")
+                        log("RESP", f"SEND {filename} [{start}:{start+chunk_size-1}] ({bytes_sent}/{chunk_size} bytes) incomplete")
                 else:
                     log("ERROR", f"Unknown command from {addr}: {request}")
                     p.send_line(conn, p.encode_error("Unknown command"))
