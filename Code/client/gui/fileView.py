@@ -108,7 +108,7 @@ class FileView(QWidget):
         hdr.resizeSection(1, 130)
 
         hdr.setSectionResizeMode(2, QHeaderView.Fixed)
-        hdr.resizeSection(2, 75)
+        hdr.resizeSection(2, 80)
 
         layout.addWidget(self.list_widget)
 

@@ -38,12 +38,12 @@ class ServerGUI(QMainWindow):
         self.signals.stats_updated.connect(self.on_stats_updated)
         self.signals.log_received.connect(self.on_log_received)
 
+        self._build_ui()
+        self._load_styles()
+        
         # Register callback/handler with engine
         self.engine.register_status_callback(self.signals.stats_updated.emit)
         add_log_handler(self.signals.log_received.emit)
-
-        self._build_ui()
-        self._load_styles()
 
     def _build_ui(self):
         central = QWidget()
