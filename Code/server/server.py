@@ -5,8 +5,10 @@ import os
 import threading
 import time
 import ssl
+from urllib import request, response
 from shared import protocol as p
 from shared.utils import log
+from shared import auth
 
 HOST = "0.0.0.0"
 PORT = 5000
@@ -46,6 +48,16 @@ class ServerEngine:
         # Download history and counts
         self.download_history = []
         self.download_counts = {}
+
+        # Thread safety lock
+        self.lock = threading.Lock()
+
+        # Authentication
+        self.user_store = auth.UserStore()
+        self.sessions = auth.SessionTracker()
+
+        # Active connections tracker
+        self.active_clients = {}
 
     def register_status_callback(self, callback):
         """Register a callback function to receive server status/metrics updates."""
@@ -349,6 +361,23 @@ class ServerEngine:
                 log("REQUEST", f"{addr} -> {request}")
                 parts = request.split("|")
                 command = parts[0]
+
+                if command in (auth.REGISTER, auth.LOGIN):
+                    response, ok, username = auth.handle_auth_command(
+                        self.user_store, command, parts
+                    )
+                    if ok:
+                        self.sessions.mark_authenticated(addr[0])
+                        log("AUTH", f"{addr} authenticated as {username}")
+                    else:
+                        log("AUTH", f"{addr} {command} failed: {response}")
+                    p.send_line(conn, response)
+                    continue
+
+                if not self.sessions.is_authenticated(addr[0]):
+                    p.send_line(conn, p.encode_error("Not authenticated. Please login first."))
+                    log("AUTH", f"{addr} rejected (not authenticated) -> {command}")
+                    continue
 
                 if command == p.LIST:
                     self._update_client_action(addr, "Listing Files")
