@@ -15,8 +15,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from server.server import ServerEngine
 from shared.utils import add_log_handler, remove_log_handler
-from gui.dashboardView import DashboardView
-from gui.clientsView import ClientsView
+from server.gui.dashboardView import DashboardView
+from server.gui.clientsView import ClientsView
+from server.gui.analyticsView import AnalyticsView
+
 
 class ServerSignals(QObject):
     stats_updated = Signal(dict)
@@ -90,7 +92,15 @@ class ServerGUI(QMainWindow):
 
         self._build_tab_dashboard()
         self._build_tab_clients()
-        self._build_tab_analytics()
+        self.analytics_view = AnalyticsView(
+    self.format_time,
+    self.dashboard.format_size
+)
+
+        self.tabs.addTab(
+    self.analytics_view,
+    "📈  Downloads & Traffic Analytics"
+)
 
         # Status Bar
         self.status_bar = self.statusBar()
@@ -110,51 +120,7 @@ class ServerGUI(QMainWindow):
 
         self.tabs.addTab(self.clients_view, "👥  Active Connections")
 
-    def _build_tab_analytics(self):
-        tab = QWidget()
-        layout = QHBoxLayout(tab)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(20)
-
-        # Left: Download History
-        left_layout = QVBoxLayout()
-        left_layout.setSpacing(10)
-        left_title = QLabel("DOWNLOAD TRANSACTION LOG")
-        left_title.setObjectName("sectionLabel")
-        left_layout.addWidget(left_title)
-
-        self.history_table = QTableWidget()
-        self.history_table.setObjectName("statsTable")
-        self.history_table.setColumnCount(6)
-        self.history_table.setHorizontalHeaderLabels([
-            "Time", "Client IP", "Filename", "Total Size", "Sent Bytes", "Status"
-        ])
-        self.history_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.history_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.history_table.setSortingEnabled(True)
-        left_layout.addWidget(self.history_table)
-
-        layout.addLayout(left_layout, 2)
-
-        # Right: Popular Files / File Counts
-        right_layout = QVBoxLayout()
-        right_layout.setSpacing(10)
-        right_title = QLabel("POPULAR FILES (TOP DOWNLOADS)")
-        right_title.setObjectName("sectionLabel")
-        right_layout.addWidget(right_title)
-
-        self.popular_table = QTableWidget()
-        self.popular_table.setObjectName("statsTable")
-        self.popular_table.setColumnCount(2)
-        self.popular_table.setHorizontalHeaderLabels(["Filename", "Downloads Count"])
-        self.popular_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.popular_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.popular_table.setSortingEnabled(True)
-        right_layout.addWidget(self.popular_table)
-
-        layout.addLayout(right_layout, 1)
-
-        self.tabs.addTab(tab, "📈  Downloads & Traffic Analytics")
+   
 
     def _make_divider(self):
         line = QFrame()
@@ -194,7 +160,13 @@ class ServerGUI(QMainWindow):
         self.clients_view.update_clients(stats["active_clients"])
 
         # Update Analytics Tables
-        self._update_analytics_tables(stats["download_history"], stats["download_counts"])
+        self.analytics_view.update_history(
+            stats["download_history"]
+        )
+        self.analytics_view.update_popular(
+            stats["download_counts"]
+        )
+    
 
     @Slot(str, str)
     def on_log_received(self, category, message):
@@ -219,73 +191,9 @@ class ServerGUI(QMainWindow):
 
     def kick_client(self, ip, port):
         if self.engine.kick_client(ip, port):
-            self.status_bar.showMessage(f"Kicked client {ip}:{port}")
+           self.status_bar.showMessage(f"Kicked client {ip}:{port}")
         else:
-            QMessageBox.critical(self, "Error", f"Failed to kick client {ip}:{port}")
-
-    def _update_analytics_tables(self, history, counts):
-        # Update download history table
-        self.history_table.setSortingEnabled(False)
-        self.history_table.setRowCount(0)
-        
-        for event in history:
-            row = self.history_table.rowCount()
-            self.history_table.insertRow(row)
-
-            time_str = self.format_time(event["timestamp"])
-            item_time = QTableWidgetItem(time_str)
-            item_time.setData(Qt.UserRole, event["timestamp"])
-
-            ip_str = f"{event['ip']}:{event['port']}"
-            item_ip = QTableWidgetItem(ip_str)
-
-            item_file = QTableWidgetItem(event["filename"])
-            
-            size_str = self.dashboard.format_size(event["total_size"])
-            item_size = QTableWidgetItem(size_str)
-            item_size.setData(Qt.UserRole, event["total_size"])
-
-            sent_str = self.dashboard.format_size(event["bytes_sent"])
-            item_sent = QTableWidgetItem(sent_str)
-            item_sent.setData(Qt.UserRole, event["bytes_sent"])
-
-            item_status = QTableWidgetItem(event["status"])
-            if event["status"] == "Success":
-                item_status.setForeground(Qt.green)
-            else:
-                item_status.setForeground(Qt.red)
-
-            for item in (item_time, item_ip, item_file, item_size, item_sent, item_status):
-                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-
-            self.history_table.setItem(row, 0, item_time)
-            self.history_table.setItem(row, 1, item_ip)
-            self.history_table.setItem(row, 2, item_file)
-            self.history_table.setItem(row, 3, item_size)
-            self.history_table.setItem(row, 4, item_sent)
-            self.history_table.setItem(row, 5, item_status)
-
-        self.history_table.setSortingEnabled(True)
-
-        # Update popular files table
-        self.popular_table.setSortingEnabled(False)
-        self.popular_table.setRowCount(0)
-        
-        for filename, count in counts.items():
-            row = self.popular_table.rowCount()
-            self.popular_table.insertRow(row)
-
-            item_file = QTableWidgetItem(filename)
-            item_count = QTableWidgetItem(str(count))
-            item_count.setData(Qt.DisplayRole, count)
-
-            for item in (item_file, item_count):
-                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-
-            self.popular_table.setItem(row, 0, item_file)
-            self.popular_table.setItem(row, 1, item_count)
-
-        self.popular_table.setSortingEnabled(True)
+           QMessageBox.critical(self, "Error", f"Failed to kick client {ip}:{port}")
 
     # ------------------------------------------------------------------ #
     #  Format Helpers                                                    #
