@@ -26,9 +26,12 @@ class FileBrowser(QObject):
     loading_changed = Signal(bool)
     fetch_error = Signal(str)
 
-    def __init__(self, parent: QObject | None = None):
+    def __init__(self, parent=None, username: str = "", password: str = ""):
         super().__init__(parent)
 
+        self._username = username
+        self._password = password
+        
         self._all_files: list[tuple[str, int]] = []
         self._filtered_files: list[tuple[str, int]] = []
 
@@ -46,7 +49,7 @@ class FileBrowser(QObject):
         self.loading_changed.emit(True)
         self.status_message.emit("Connecting to server...")
 
-        self._fetch_thread = FetchFilesThread()
+        self._fetch_thread = FetchFilesThread(username=self._username, password=self._password)
 
         self._fetch_thread.files_received.connect(
             self._on_files_received
@@ -98,9 +101,7 @@ class FileBrowser(QObject):
     def _on_fetch_error(self, error: str) -> None:
         self._all_files = []
         self._filtered_files = []
-
         self.files_changed.emit([])
-
         self.fetch_error.emit(error)
 
         self.status_message.emit(

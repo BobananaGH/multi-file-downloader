@@ -21,10 +21,12 @@ class DownloadCoordinator(QObject):
     progress = Signal(str, int, float, float)   # filename, percent, speed_bytes_s, eta
     finished = Signal(bool, str)            # success, message_or_path
 
-    def __init__(self, filename: str, total_size: int, parent=None):
+    def __init__(self, filename: str, total_size: int, parent=None, username: str = "", password: str = ""):
         super().__init__(parent)
         self.filename = filename
         self.total_size = total_size
+        self._username = username
+        self._password = password
         self.save_path = self._build_save_path(filename)
 
         self._chunks: list[ChunkDownloadThread] = []
@@ -57,7 +59,11 @@ class DownloadCoordinator(QObject):
         self._chunk_done = [False] * n
 
         for i, (start, end) in enumerate(ranges):
-            chunk = ChunkDownloadThread(self.filename, self.save_path, start, end)
+            chunk = ChunkDownloadThread(
+                self.filename, self.save_path, start, end,
+                username=self._username,
+                password=self._password
+            )
             chunk.progress.connect(lambda recv, spd, idx=i: self._on_chunk_progress(idx, recv, spd))
             chunk.finished_chunk.connect(lambda ok, msg, idx=i: self._on_chunk_finished(idx, ok, msg))
             chunk.finished.connect(chunk.deleteLater)

@@ -1,3 +1,5 @@
+# client/__main__.py
+
 import sys
 from PySide6.QtWidgets import QApplication, QDialog
 from .clientGui import FileClientGUI
@@ -11,7 +13,8 @@ def main():
     if login.exec() != QDialog.Accepted:
         sys.exit(0)
 
-    window = FileClientGUI()
+    username, password = login.credentials
+    window = FileClientGUI(username=username, password=password)
     window.show()
 
     sys.exit(app.exec())

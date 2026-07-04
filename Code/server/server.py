@@ -5,9 +5,8 @@ import os
 import threading
 import time
 import ssl
-from urllib import request, response
 from shared import protocol as p
-from shared.utils import log
+from shared.utils import LogLevel, log
 from shared import auth
 
 HOST = "0.0.0.0"
@@ -33,6 +32,10 @@ class ServerEngine:
         # Active connections tracker
         self.active_clients = {}
         
+        # Authentication
+        self.user_store = auth.UserStore()
+        self.sessions = auth.SessionTracker()
+        
         # Metrics and statistics
         self.start_time = 0.0
         self.total_bytes_sent = 0
@@ -48,16 +51,6 @@ class ServerEngine:
         # Download history and counts
         self.download_history = []
         self.download_counts = {}
-
-        # Thread safety lock
-        self.lock = threading.Lock()
-
-        # Authentication
-        self.user_store = auth.UserStore()
-        self.sessions = auth.SessionTracker()
-
-        # Active connections tracker
-        self.active_clients = {}
 
     def register_status_callback(self, callback):
         """Register a callback function to receive server status/metrics updates."""
@@ -315,20 +308,23 @@ class ServerEngine:
             client_thread.start()
 
     def _add_client(self, addr, sock, thread):
+        client_id = f"C-{addr[0]}:{addr[1]}"
         with self.lock:
             self.active_clients[addr] = {
                 "socket": sock,
                 "thread": thread,
                 "connect_time": time.time(),
-                "current_action": "Connected"
+                "current_action": "Connected",
+                "id": client_id
             }
-        log("CLIENT", f"Connected: {addr}")
+        log("SESSION", f"{addr} connected")
         self._notify_status_change()
 
     def _remove_client(self, addr):
         with self.lock:
             self.active_clients.pop(addr, None)
-        log("CLIENT", f"Disconnected: {addr}")
+        self.sessions.clear(addr[0])  
+        log("SESSION", f"{addr} disconnected")
         self._notify_status_change()
 
     def _update_client_action(self, addr, action):
@@ -358,7 +354,7 @@ class ServerEngine:
                 if request is None:
                     break
 
-                log("REQUEST", f"{addr} -> {request}")
+                log("REQUEST", f"{addr} -> {request}", LogLevel.DEBUG)
                 parts = request.split("|")
                 command = parts[0]
 
@@ -368,22 +364,22 @@ class ServerEngine:
                     )
                     if ok:
                         self.sessions.mark_authenticated(addr[0])
-                        log("AUTH", f"{addr} authenticated as {username}")
+                        log("AUTH", f"{addr} success: {username}", LogLevel.INFO)
                     else:
-                        log("AUTH", f"{addr} {command} failed: {response}")
+                        log("AUTH", f"{addr} failed login", LogLevel.WARN)
                     p.send_line(conn, response)
                     continue
 
                 if not self.sessions.is_authenticated(addr[0]):
                     p.send_line(conn, p.encode_error("Not authenticated. Please login first."))
-                    log("AUTH", f"{addr} rejected (not authenticated) -> {command}")
+                    log("AUTH", "unauthorized access attempt", LogLevel.WARN)
                     continue
 
                 if command == p.LIST:
                     self._update_client_action(addr, "Listing Files")
                     files = self.get_file_list()
                     p.send_line(conn, p.encode_list(files))
-                    log("RESP", f"{addr} LIST ({len(files)} files)")
+                    log("RESP", f"{addr} LIST ({len(files)} files)", LogLevel.DEBUG)
                     self._update_client_action(addr, "Idle")
 
                 elif command == p.GET:
@@ -469,11 +465,11 @@ class ServerEngine:
                         self._update_client_action(addr, "Idle")
 
                     if success:
-                        log("RESP", f"SEND {filename} [{start}:{start+chunk_size-1}] ({bytes_sent}/{chunk_size} bytes) OK")
+                        log("TRANSFER", f"SEND {filename} [{start}:{start+chunk_size-1}] ({bytes_sent}/{chunk_size} bytes) OK", LogLevel.INFO)
                     else:
-                        log("RESP", f"SEND {filename} [{start}:{start+chunk_size-1}] ({bytes_sent}/{chunk_size} bytes) incomplete")
+                        log("TRANSFER", f"SEND {filename} [{start}:{start+chunk_size-1}] ({bytes_sent}/{chunk_size} bytes) incomplete", LogLevel.WARN)
                 else:
-                    log("ERROR", f"Unknown command from {addr}: {request}")
+                    log("WARN", f"Unknown command from {addr}: {request}")
                     p.send_line(conn, p.encode_error("Unknown command"))
 
         except Exception as e:

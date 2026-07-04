@@ -248,7 +248,7 @@ try:
             self._thread: _AuthThread | None = None
 
             self.setWindowTitle("FLUX — Sign in")
-            self.setMinimumWidth(360)
+            self.setFixedSize(370, 200)
             self.setModal(True)
 
             self._build_ui()
@@ -362,7 +362,13 @@ try:
             self._set_busy(False)
             self._show_status(message, ok)
             if ok:
+                self._username = self._thread.username
+                self._password = self._thread.password
                 self.accept()
+                
+        @property
+        def credentials(self) -> tuple[str, str]:
+            return getattr(self, '_username', ''), getattr(self, '_password', '')
 
 except ImportError:
     # PySide6 not installed in this environment (e.g. a headless server

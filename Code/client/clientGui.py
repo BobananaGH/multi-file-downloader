@@ -7,7 +7,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from PySide6.QtWidgets import (
     QApplication, QWidget, QVBoxLayout, QHBoxLayout,
-    QPushButton, QLabel, QFrame, QMainWindow, QMessageBox
+    QPushButton, QLabel, QFrame, QMainWindow
 )
 from PySide6.QtCore import Qt
 
@@ -20,14 +20,14 @@ from client.core.fileStatus import FileStatus
 from client.config import DOWNLOAD_DIR
 
 class FileClientGUI(QMainWindow):
-    def __init__(self, auto_load=True):
+    def __init__(self, auto_load=True, username: str = "", password: str = ""):
         super().__init__()
         self.setWindowTitle("FLUX — Multi File Downloader")
         self.setMinimumSize(600, 735)
         self.resize(680, 760)
 
-        self.browser = FileBrowser()
-        self.download_manager = DownloadManager(self)
+        self.browser = FileBrowser(username=username, password=password)
+        self.download_manager = DownloadManager(self, username=username, password=password)
 
         self._build_ui()
         self._wire_signals()

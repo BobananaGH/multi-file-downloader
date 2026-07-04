@@ -28,6 +28,17 @@ class Client:
 
         self.conn = p.Connection(self.socket)
 
+    def login(self, username: str, password: str) -> tuple[bool, str]:
+        from shared.auth import LOGIN, AUTH_OK
+        self.conn.send_line(f"{LOGIN}|{username}|{password}")
+        response = self.conn.recv_line()
+        if not response:
+            return False, "No response"
+        parts = response.split("|", 1)
+        ok = parts[0] == AUTH_OK
+        msg = parts[1] if len(parts) > 1 else ""
+        return ok, msg
+
     def list_files(self) -> list[tuple[str, int]]:
         self.conn.send_line(p.LIST)
         data = self.conn.recv_line()

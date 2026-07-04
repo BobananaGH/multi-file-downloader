@@ -9,9 +9,20 @@ class FetchFilesThread(QThread):
     files_received = Signal(list)
     error_occurred = Signal(str)
 
+    def __init__(self, username: str = "", password: str = ""):
+        super().__init__()
+        self._username = username
+        self._password = password
+
     def run(self):
         try:
             c = Client()
+            ok, msg = c.login(self._username, self._password)
+            if not ok:
+                self.error_occurred.emit(f"Auth failed: {msg}")
+                c.close()
+                return
+            
             files = c.list_files()
             c.close()
             self.files_received.emit(files)
@@ -28,12 +39,15 @@ class ChunkDownloadThread(QThread):
     progress = Signal(int, float)        # bytes_received_this_chunk, speed_bytes_s
     finished_chunk = Signal(bool, str)    # success, error_message
     
-    def __init__(self, filename: str, save_path: str, start: int, end: int):
+    def __init__(self, filename: str, save_path: str, start: int, end: int,
+                 username: str = "", password: str = ""):
         super().__init__()
         self.filename = filename
         self.save_path = save_path
         self.range_start = start
         self.range_end = end
+        self._username = username
+        self._password = password
 
     def cancel(self):
         self.requestInterruption()
@@ -43,6 +57,11 @@ class ChunkDownloadThread(QThread):
         f = None
         try:
             c = Client()
+
+            ok, msg = c.login(self._username, self._password)
+            if not ok:
+                self.finished_chunk.emit(False, f"Auth failed: {msg}")
+                return
 
             if self.isInterruptionRequested():
                 self.finished_chunk.emit(False, "Cancelled")

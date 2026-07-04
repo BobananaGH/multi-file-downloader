@@ -1,0 +1,12 @@
+{
+  "khoi": {
+    "username": "khoi",
+    "salt": "d4ddae3028b12eef1d12eebd59e5edff",
+    "hash": "d31f21ad4754d9ac4896614bf6e9c8b27fe74b0016681092c3d56d722dd404a3"
+  },
+  "khoi1": {
+    "username": "khoi1",
+    "salt": "6eb9391e9224df8aa73630f9913e989f",
+    "hash": "4b6aa85d6b1274f8c3edce4acd2ed02cfcfac26195f3e4d6328de83063611fda"
+  }
+}

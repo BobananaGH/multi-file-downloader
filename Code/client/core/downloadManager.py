@@ -12,11 +12,12 @@ class DownloadManager(QObject):
     download_finished = Signal(str, bool, str)
     download_started = Signal(str)
 
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, username: str = "", password: str = ""):
         super().__init__(parent)
 
         self._coordinators: dict[str, DownloadCoordinator] = {}
-
+        self._username = username
+        self._password = password
     # ---------------------------------------------------------
     # PUBLIC API
     # ---------------------------------------------------------
@@ -30,7 +31,7 @@ class DownloadManager(QObject):
             self.download_finished.emit(filename, False, "Unknown file size")
             return
 
-        coordinator = DownloadCoordinator(filename, size)
+        coordinator = DownloadCoordinator(filename, size, username=self._username, password=self._password)
         self._coordinators[filename] = coordinator
 
         coordinator.progress.connect(
