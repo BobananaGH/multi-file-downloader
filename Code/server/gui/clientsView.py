@@ -1,3 +1,4 @@
+# Code/server/gui/clientsView.py
 import datetime
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel,
@@ -61,11 +62,11 @@ class ClientsView(QWidget):
     # ---------------- Public API ----------------
     def selected_client(self):
         """Trả về tuple (ip, port) của client đang được chọn trong bảng, hoặc None nếu chưa chọn gì."""
-        selected_rows = self.client_table.selectedItems()
-        if not selected_rows:
+        indexes = self.client_table.selectionModel().selectedRows()
+        if not indexes:
             return None
 
-        row = selected_rows[0].row()
+        row = indexes[0].row()
         ip = self.client_table.item(row, 0).text()
         port = self.client_table.item(row, 1).text()
         return ip, port
@@ -82,7 +83,6 @@ class ClientsView(QWidget):
             # Columns: IP, Port, Connected Since, Uptime, Activity
             item_ip = QTableWidgetItem(info["ip"])
             item_port = QTableWidgetItem(str(info["port"]))
-            item_port.setData(Qt.DisplayRole, info["port"])
 
             conn_time = self._format_time(info["connect_time"])
             item_conn = QTableWidgetItem(conn_time)

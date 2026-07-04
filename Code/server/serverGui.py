@@ -1,11 +1,11 @@
+# Code/server/ServerGui.py
 import sys
 import os
 import time
 import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
-    QVBoxLayout, QHBoxLayout, QLabel,
-    QPushButton, QTextEdit, QTableWidget,
+    QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
     QTableWidgetItem, QHeaderView, QTabWidget,
     QFrame, QMessageBox
 )

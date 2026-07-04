@@ -40,12 +40,15 @@ class DashboardView(QWidget):
         ctrl_layout.setContentsMargins(16, 16, 16, 16)
 
         ctrl_title = QLabel("SYSTEM CONTROLS")
+        ctrl_title.setObjectName("cardHeader")
         ctrl_layout.addWidget(ctrl_title)
 
         self.start_btn = QPushButton("▶ Start Server")
+        self.start_btn.setObjectName("startBtn")
         self.start_btn.clicked.connect(self.start_requested.emit)
 
         self.stop_btn = QPushButton("■ Stop Server")
+        self.stop_btn.setObjectName("stopBtn")
         self.stop_btn.setEnabled(False)
         self.stop_btn.clicked.connect(self.stop_requested.emit)
 
@@ -56,10 +59,13 @@ class DashboardView(QWidget):
 
         # Metrics
         metrics_card = QFrame()
+        metrics_card.setObjectName("metricCard")
         metrics_layout = QVBoxLayout(metrics_card)
         metrics_layout.setContentsMargins(16, 16, 16, 16)
 
-        metrics_layout.addWidget(QLabel("CORE METRICS"))
+        title = QLabel("CORE METRICS")
+        title.setObjectName("cardHeader")
+        metrics_layout.addWidget(title)
 
         self.metric_uptime = self._create_metric("Uptime", "0s")
         self.metric_clients = self._create_metric("Clients", "0")
@@ -84,6 +90,7 @@ class DashboardView(QWidget):
         header.addStretch()
 
         clear_btn = QPushButton("Clear")
+        clear_btn.setObjectName("clearBtn")
         clear_btn.clicked.connect(self.clear_logs)
         header.addWidget(clear_btn)
 
@@ -91,6 +98,7 @@ class DashboardView(QWidget):
 
         self.log_area = QTextEdit()
         self.log_area.setReadOnly(True)
+        self.log_area.setObjectName("consoleLog")
         right_col.addWidget(self.log_area)
 
         layout.addLayout(right_col, 2)
@@ -103,10 +111,13 @@ class DashboardView(QWidget):
         label_name = QLabel(name)
         label_value = QLabel(value)
 
+        label_name.setObjectName("metricLabel")
+        label_value.setObjectName("metricValue")
+
         layout.addWidget(label_name)
         layout.addWidget(label_value)
 
-        widget.value_label = label_value  # IMPORTANT
+        widget.value_label = label_value
 
         return widget
 
