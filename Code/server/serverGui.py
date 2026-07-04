@@ -1,15 +1,13 @@
 # Code/server/ServerGui.py
 import sys
 import os
-import time
 import datetime
 from PySide6.QtWidgets import (
     QApplication, QMainWindow, QWidget,
-    QVBoxLayout, QHBoxLayout, QLabel, QTableWidget,
-    QTableWidgetItem, QHeaderView, QTabWidget,
+    QVBoxLayout, QHBoxLayout, QLabel, QTabWidget,
     QFrame, QMessageBox
 )
-from PySide6.QtCore import Qt, QObject, Signal, Slot
+from PySide6.QtCore import QObject, Signal, Slot
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 

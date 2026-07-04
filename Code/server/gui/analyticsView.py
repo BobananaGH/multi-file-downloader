@@ -1,10 +1,10 @@
-
+# Code/server/gui/analyticsView.py
 from PySide6.QtWidgets import (
     QWidget, QHBoxLayout, QVBoxLayout, QLabel,
     QTableWidget, QTableWidgetItem, QHeaderView
 )
 from PySide6.QtCore import Qt
-
+from PySide6.QtGui import QColor
 
 class AnalyticsView(QWidget):
     def __init__(self, format_time, format_size):
@@ -75,7 +75,7 @@ class AnalyticsView(QWidget):
             item_sent.setData(Qt.UserRole, event["bytes_sent"])
 
             item_status = QTableWidgetItem(event["status"])
-            item_status.setForeground(Qt.green if event["status"] == "Success" else Qt.red)
+            item_status.setForeground(QColor("green") if event["status"] == "Success" else QColor("red"))
 
             for item in (item_time, item_ip, item_file, item_size, item_sent, item_status):
                 item.setFlags(item.flags() & ~Qt.ItemIsEditable)
