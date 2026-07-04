@@ -10,13 +10,12 @@ from PySide6.QtWidgets import (
     QFrame, QMessageBox
 )
 from PySide6.QtCore import Qt, QObject, Signal, Slot
-from PySide6.QtGui import QIcon, QFont
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 
 from server.server import ServerEngine
 from shared.utils import add_log_handler, remove_log_handler
-
+from gui.dashboardView import DashboardView
 
 class ServerSignals(QObject):
     stats_updated = Signal(dict)
@@ -98,94 +97,11 @@ class ServerGUI(QMainWindow):
         self.status_bar.showMessage("Ready")
 
     def _build_tab_dashboard(self):
-        tab = QWidget()
-        layout = QHBoxLayout(tab)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(20)
+        self.dashboard = DashboardView()
+        self.dashboard.start_requested.connect(self.start_server)
+        self.dashboard.stop_requested.connect(self.stop_server)
 
-        # Left Column: Controls & Metrics
-        left_col = QVBoxLayout()
-        left_col.setSpacing(16)
-
-        # Controls Group
-        ctrl_card = QFrame()
-        ctrl_card.setObjectName("metricCard")
-        ctrl_layout = QVBoxLayout(ctrl_card)
-        ctrl_layout.setContentsMargins(16, 16, 16, 16)
-        ctrl_layout.setSpacing(12)
-
-        ctrl_title = QLabel("SYSTEM CONTROLS")
-        ctrl_title.setObjectName("cardHeader")
-        ctrl_layout.addWidget(ctrl_title)
-
-        self.start_btn = QPushButton("▶  Start Server")
-        self.start_btn.setObjectName("startBtn")
-        self.start_btn.setCursor(Qt.PointingHandCursor)
-        self.start_btn.clicked.connect(self.start_server)
-
-        self.stop_btn = QPushButton("■  Stop Server")
-        self.stop_btn.setObjectName("stopBtn")
-        self.stop_btn.setCursor(Qt.PointingHandCursor)
-        self.stop_btn.setEnabled(False)
-        self.stop_btn.clicked.connect(self.stop_server)
-
-        ctrl_layout.addWidget(self.start_btn)
-        ctrl_layout.addWidget(self.stop_btn)
-        left_col.addWidget(ctrl_card)
-
-        # Metrics Card Grid
-        metrics_card = QFrame()
-        metrics_card.setObjectName("metricCard")
-        metrics_layout = QVBoxLayout(metrics_card)
-        metrics_layout.setContentsMargins(16, 16, 16, 16)
-        metrics_layout.setSpacing(14)
-
-        metrics_title = QLabel("CORE METRICS")
-        metrics_title.setObjectName("cardHeader")
-        metrics_layout.addWidget(metrics_title)
-
-        # Metric Items
-        self.metric_uptime = self._create_metric_widget("Uptime", "0s")
-        self.metric_clients = self._create_metric_widget("Active Clients", "0")
-        self.metric_speed = self._create_metric_widget("Upload Speed", "0.0 KB/s")
-        self.metric_bytes = self._create_metric_widget("Total Bytes Sent", "0 B")
-
-        metrics_layout.addWidget(self.metric_uptime)
-        metrics_layout.addWidget(self.metric_clients)
-        metrics_layout.addWidget(self.metric_speed)
-        metrics_layout.addWidget(self.metric_bytes)
-
-        left_col.addWidget(metrics_card)
-        left_col.addStretch()
-
-        layout.addLayout(left_col, 1)
-
-        # Right Column: Logs Console
-        right_col = QVBoxLayout()
-        right_col.setSpacing(10)
-
-        logs_title_row = QHBoxLayout()
-        logs_title = QLabel("LIVE LOGGER CONSOLE")
-        logs_title.setObjectName("sectionLabel")
-        self.clear_logs_btn = QPushButton("Clear Console")
-        self.clear_logs_btn.setObjectName("clearBtn")
-        self.clear_logs_btn.clicked.connect(self.clear_logs)
-
-        logs_title_row.addWidget(logs_title)
-        logs_title_row.addStretch()
-        logs_title_row.addWidget(self.clear_logs_btn)
-
-        right_col.addLayout(logs_title_row)
-
-        self.log_area = QTextEdit()
-        self.log_area.setObjectName("consoleLog")
-        self.log_area.setReadOnly(True)
-        self.log_area.setPlaceholderText("Monitoring socket stream activities...")
-        right_col.addWidget(self.log_area)
-
-        layout.addLayout(right_col, 2)
-
-        self.tabs.addTab(tab, "⚙  Dashboard & Console")
+        self.tabs.addTab(self.dashboard, "⚙  Dashboard & Console")
 
     def _build_tab_clients(self):
         tab = QWidget()
@@ -318,21 +234,14 @@ class ServerGUI(QMainWindow):
         if is_running:
             self.status_label.setText("Server: Running")
             self.status_bulb.setObjectName("statusBulbRunning")
-            self.start_btn.setEnabled(False)
-            self.stop_btn.setEnabled(True)
         else:
             self.status_label.setText("Server: Stopped")
             self.status_bulb.setObjectName("statusBulbStopped")
-            self.start_btn.setEnabled(True)
-            self.stop_btn.setEnabled(False)
         self.status_bulb.style().unpolish(self.status_bulb)
         self.status_bulb.style().polish(self.status_bulb)
 
-        # Update core metric cards
-        self.metric_uptime.property("val_label").setText(self.format_uptime(stats["uptime"]))
-        self.metric_clients.property("val_label").setText(str(stats["active_connections_count"]))
-        self.metric_speed.property("val_label").setText(f"{stats['upload_speed_kbps']:.1f} KB/s")
-        self.metric_bytes.property("val_label").setText(self.format_size(stats["total_bytes_sent"]))
+        self.dashboard.set_server_running(is_running)
+        self.dashboard.update_metrics(stats)
 
         # Update Active Clients Table
         self._update_clients_table(stats["active_clients"])
@@ -342,19 +251,14 @@ class ServerGUI(QMainWindow):
 
     @Slot(str, str)
     def on_log_received(self, category, message):
-        # Write formatted log lines into the text area
-        timestamp = datetime.datetime.now().strftime("%H:%M:%S")
-        self.log_area.append(f"<span style='color:#777799;'>[{timestamp}]</span> <b style='color:#4a90e2;'>[{category:<7}]</b> {message}")
-        # Auto scroll to bottom
-        sb = self.log_area.verticalScrollBar()
-        sb.setValue(sb.maximum())
+        self.dashboard.append_log(category, message)
 
     # ------------------------------------------------------------------ #
     #  Actions & UI Updates                                              #
     # ------------------------------------------------------------------ #
 
     def start_server(self):
-        self.log_area.append("Starting server...")
+        self.dashboard.append_log("INFO", "Starting server...")
         if self.engine.start():
             self.status_bar.showMessage("Server started successfully.")
         else:
@@ -362,12 +266,9 @@ class ServerGUI(QMainWindow):
             self.status_bar.showMessage("Error: Server failed to start.")
 
     def stop_server(self):
-        self.log_area.append("Shutting down server...")
+        self.dashboard.append_log("INFO", "Shutting down server...")
         self.engine.stop()
         self.status_bar.showMessage("Server stopped.")
-
-    def clear_logs(self):
-        self.log_area.clear()
 
     def kick_selected_client(self):
         selected_rows = self.client_table.selectedItems()
@@ -409,7 +310,7 @@ class ServerGUI(QMainWindow):
             conn_time = self.format_time(info["connect_time"])
             item_conn = QTableWidgetItem(conn_time)
             
-            uptime_str = self.format_uptime(info["uptime"])
+            uptime_str = self.dashboard.format_uptime(info["uptime"])
             item_uptime = QTableWidgetItem(uptime_str)
             item_uptime.setData(Qt.UserRole, info["uptime"]) # store float for sorting
             
@@ -445,11 +346,11 @@ class ServerGUI(QMainWindow):
 
             item_file = QTableWidgetItem(event["filename"])
             
-            size_str = self.format_size(event["total_size"])
+            size_str = self.dashboard.format_size(event["total_size"])
             item_size = QTableWidgetItem(size_str)
             item_size.setData(Qt.UserRole, event["total_size"])
 
-            sent_str = self.format_size(event["bytes_sent"])
+            sent_str = self.dashboard.format_size(event["bytes_sent"])
             item_sent = QTableWidgetItem(sent_str)
             item_sent.setData(Qt.UserRole, event["bytes_sent"])
 
@@ -494,27 +395,6 @@ class ServerGUI(QMainWindow):
     # ------------------------------------------------------------------ #
     #  Format Helpers                                                    #
     # ------------------------------------------------------------------ #
-
-    def format_uptime(self, secs):
-        if secs <= 0:
-            return "0s"
-        hrs = int(secs // 3600)
-        mins = int((secs % 3600) // 60)
-        seconds = int(secs % 60)
-        if hrs > 0:
-            return f"{hrs}h {mins}m {seconds}s"
-        if mins > 0:
-            return f"{mins}m {seconds}s"
-        return f"{seconds}s"
-
-    def format_size(self, size_bytes):
-        if size_bytes < 1024:
-            return f"{size_bytes} B"
-        elif size_bytes < 1024 * 1024:
-            return f"{size_bytes / 1024:.1f} KB"
-        elif size_bytes < 1024 * 1024 * 1024:
-            return f"{size_bytes / (1024 * 1024):.1f} MB"
-        return f"{size_bytes / (1024 * 1024 * 1024):.1f} GB"
 
     def format_time(self, timestamp):
         dt = datetime.datetime.fromtimestamp(timestamp)
