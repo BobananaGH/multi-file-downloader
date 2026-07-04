@@ -1,3 +1,4 @@
+# Code/shared/icons.py
 import os
 
 FILE_ICONS = {

@@ -1,4 +1,4 @@
-# shared/protocol.py
+# Code/shared/protocol.py
 
 # =========================
 # Client → Server Commands
