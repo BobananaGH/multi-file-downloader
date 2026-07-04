@@ -1,4 +1,3 @@
-# Code/server/serverGui.py
 import sys
 import os
 import time
@@ -17,6 +16,7 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))
 from server.server import ServerEngine
 from shared.utils import add_log_handler, remove_log_handler
 from gui.dashboardView import DashboardView
+from gui.clientsView import ClientsView
 
 class ServerSignals(QObject):
     stats_updated = Signal(dict)
@@ -105,48 +105,10 @@ class ServerGUI(QMainWindow):
         self.tabs.addTab(self.dashboard, "⚙  Dashboard & Console")
 
     def _build_tab_clients(self):
-        tab = QWidget()
-        layout = QVBoxLayout(tab)
-        layout.setContentsMargins(24, 20, 24, 20)
-        layout.setSpacing(14)
+        self.clients_view = ClientsView()
+        self.clients_view.kick_requested.connect(self.kick_client)
 
-        header_row = QHBoxLayout()
-        title = QLabel("ACTIVE CLIENT CONNECTIONS")
-        title.setObjectName("sectionLabel")
-        header_row.addWidget(title)
-        header_row.addStretch()
-        layout.addLayout(header_row)
-
-        # Client details table
-        self.client_table = QTableWidget()
-        self.client_table.setObjectName("statsTable")
-        self.client_table.setColumnCount(5)
-        self.client_table.setHorizontalHeaderLabels([
-            "IP Address", "Port", "Connected Since", "Uptime", "Current Activity"
-        ])
-        self.client_table.horizontalHeader().setSectionResizeMode(QHeaderView.Stretch)
-        self.client_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeToContents)
-        self.client_table.setSelectionBehavior(QTableWidget.SelectRows)
-        self.client_table.setSelectionMode(QTableWidget.SingleSelection)
-        self.client_table.setSortingEnabled(True)
-        layout.addWidget(self.client_table)
-
-        # Action row
-        action_row = QHBoxLayout()
-        self.kick_btn = QPushButton("⚠  Kick Selected Client")
-        self.kick_btn.setObjectName("kickBtn")
-        self.kick_btn.setCursor(Qt.PointingHandCursor)
-        self.kick_btn.setEnabled(False)
-        self.kick_btn.clicked.connect(self.kick_selected_client)
-        action_row.addWidget(self.kick_btn)
-        action_row.addStretch()
-        layout.addLayout(action_row)
-
-        self.client_table.itemSelectionChanged.connect(
-            lambda: self.kick_btn.setEnabled(len(self.client_table.selectedItems()) > 0)
-        )
-
-        self.tabs.addTab(tab, "👥  Active Connections")
+        self.tabs.addTab(self.clients_view, "👥  Active Connections")
 
     def _build_tab_analytics(self):
         tab = QWidget()
@@ -194,22 +156,6 @@ class ServerGUI(QMainWindow):
 
         self.tabs.addTab(tab, "📈  Downloads & Traffic Analytics")
 
-    def _create_metric_widget(self, name, default_val):
-        widget = QWidget()
-        layout = QHBoxLayout(widget)
-        layout.setContentsMargins(0, 4, 0, 4)
-
-        lbl_name = QLabel(name)
-        lbl_name.setObjectName("metricLabel")
-        lbl_val = QLabel(default_val)
-        lbl_val.setObjectName("metricValue")
-        lbl_val.setAlignment(Qt.AlignRight | Qt.AlignVCenter)
-
-        layout.addWidget(lbl_name)
-        layout.addWidget(lbl_val)
-        widget.setProperty("val_label", lbl_val)
-        return widget
-
     def _make_divider(self):
         line = QFrame()
         line.setFrameShape(QFrame.HLine)
@@ -245,7 +191,7 @@ class ServerGUI(QMainWindow):
         self.dashboard.update_metrics(stats)
 
         # Update Active Clients Table
-        self._update_clients_table(stats["active_clients"])
+        self.clients_view.update_clients(stats["active_clients"])
 
         # Update Analytics Tables
         self._update_analytics_tables(stats["download_history"], stats["download_counts"])
@@ -271,63 +217,11 @@ class ServerGUI(QMainWindow):
         self.engine.stop()
         self.status_bar.showMessage("Server stopped.")
 
-    def kick_selected_client(self):
-        selected_rows = self.client_table.selectedItems()
-        if not selected_rows:
-            return
-        
-        # IP is at column 0, Port is at column 1
-        row = selected_rows[0].row()
-        ip = self.client_table.item(row, 0).text()
-        port = self.client_table.item(row, 1).text()
-
-        confirm = QMessageBox.warning(
-            self, "Kick Connection", 
-            f"Are you sure you want to kick client connection {ip}:{port}?",
-            QMessageBox.Yes | QMessageBox.No
-        )
-
-        if confirm == QMessageBox.Yes:
-            if self.engine.kick_client(ip, port):
-                self.status_bar.showMessage(f"Kicked client {ip}:{port}")
-            else:
-                QMessageBox.critical(self, "Error", f"Failed to kick client {ip}:{port}")
-
-    def _update_clients_table(self, clients):
-        # Prevent refreshing selection/sort focus during update if possible
-        self.client_table.setSortingEnabled(False)
-        self.client_table.setRowCount(0)
-        
-        for info in clients:
-            row = self.client_table.rowCount()
-            self.client_table.insertRow(row)
-
-            # Columns: IP, Port, Connected Since, Uptime, Activity
-            item_ip = QTableWidgetItem(info["ip"])
-            item_port = QTableWidgetItem(str(info["port"]))
-            item_port.setData(Qt.DisplayRole, info["port"])
-            
-            # format connection time
-            conn_time = self.format_time(info["connect_time"])
-            item_conn = QTableWidgetItem(conn_time)
-            
-            uptime_str = self.dashboard.format_uptime(info["uptime"])
-            item_uptime = QTableWidgetItem(uptime_str)
-            item_uptime.setData(Qt.UserRole, info["uptime"]) # store float for sorting
-            
-            item_act = QTableWidgetItem(info["current_action"])
-
-            # Make items read-only
-            for item in (item_ip, item_port, item_conn, item_uptime, item_act):
-                item.setFlags(item.flags() & ~Qt.ItemIsEditable)
-
-            self.client_table.setItem(row, 0, item_ip)
-            self.client_table.setItem(row, 1, item_port)
-            self.client_table.setItem(row, 2, item_conn)
-            self.client_table.setItem(row, 3, item_uptime)
-            self.client_table.setItem(row, 4, item_act)
-
-        self.client_table.setSortingEnabled(True)
+    def kick_client(self, ip, port):
+        if self.engine.kick_client(ip, port):
+            self.status_bar.showMessage(f"Kicked client {ip}:{port}")
+        else:
+            QMessageBox.critical(self, "Error", f"Failed to kick client {ip}:{port}")
 
     def _update_analytics_tables(self, history, counts):
         # Update download history table
